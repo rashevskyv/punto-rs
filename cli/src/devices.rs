@@ -20,11 +20,11 @@ use evdev::{
 };
 
 use crate::{
-    VIRTUAL_NAME,
     config::Config,
     daemon::Message,
     engine::{DeviceEvent, KeyEvent},
     keys,
+    linux::VIRTUAL_NAME,
     session::SessionGuard,
 };
 

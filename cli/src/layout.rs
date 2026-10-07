@@ -280,12 +280,18 @@ fn word_core(text: &str) -> Option<&str> {
     Some(&text[start..end])
 }
 
-/// Слово из списка исключений: регистр и краевая пунктуация не важны.
-fn is_exception(keys: &[(u16, bool)], shown: Lang) -> bool {
+/// Слово на экране в нижнем регистре без краевой пунктуации: в таком виде
+/// хранятся исключения, встроенные и пользовательские.
+pub fn shown_word(keys: &[(u16, bool)], shown: Lang) -> Option<String> {
     lowercase(shown, keys)
         .as_deref()
         .and_then(word_core)
-        .is_some_and(|word| EXCEPTIONS.lines().any(|line| line == word))
+        .map(str::to_string)
+}
+
+/// Слово из списка исключений: регистр и краевая пунктуация не важны.
+fn is_exception(keys: &[(u16, bool)], shown: Lang) -> bool {
+    shown_word(keys, shown).is_some_and(|word| EXCEPTIONS.lines().any(|line| line == word))
 }
 
 // Явный путь: модуль подключают и через `#[path]` из `examples/`.

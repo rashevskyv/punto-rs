@@ -16,7 +16,9 @@ pub const KEY_LEFTMETA: u16 = 125;
 pub const KEY_RIGHTMETA: u16 = 126;
 
 /// Кнопки указателя: `BTN_LEFT` (0x110) … `BTN_TASK` (0x117).
+#[cfg(target_os = "linux")]
 pub const BTN_LEFT: u16 = 0x110;
+#[cfg(target_os = "linux")]
 pub const BTN_TASK: u16 = 0x117;
 
 /// Клик мышью переставляет курсор ввода, поэтому сбрасывает буфер.
@@ -24,6 +26,7 @@ pub const BTN_TASK: u16 = 0x117;
 /// Тач-события тачпада (`BTN_TOUCH`, `BTN_TOOL_FINGER`) сюда намеренно не
 /// входят: они приходят от любого касания, даже от случайного, и сбрасывали бы
 /// буфер посреди набора.
+#[cfg(target_os = "linux")]
 pub fn is_pointer_button(code: u16) -> bool {
     (BTN_LEFT..=BTN_TASK).contains(&code)
 }

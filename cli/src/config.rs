@@ -5,6 +5,7 @@ use std::{collections::HashSet, fs, path::Path};
 use crate::{i18n::Language, keys};
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub hotkey: Vec<u16>,
     pub phrase_hotkey: Vec<u16>,
@@ -20,6 +21,7 @@ pub struct Config {
     pub buffer_timeout_ms: u64,
     pub auto_switch: bool,
     pub language: Language,
+    pub tray: bool,
 }
 
 impl Default for Config {
@@ -27,7 +29,12 @@ impl Default for Config {
         Self {
             hotkey: vec![keys::KEY_INSERT],
             phrase_hotkey: vec![keys::KEY_LEFTMETA, keys::KEY_INSERT],
-            pause_hotkey: vec![keys::KEY_LEFTMETA, 119],
+            // Win+Pause в Windows открывает «О системе».
+            pause_hotkey: if cfg!(windows) {
+                vec![keys::KEY_LEFTSHIFT, 119]
+            } else {
+                vec![keys::KEY_LEFTMETA, 119]
+            },
             layout_switch: vec![keys::KEY_LEFTMETA, keys::KEY_SPACE],
             key_delay_ms: 1,
             post_backspace_ms: 0,
@@ -39,6 +46,7 @@ impl Default for Config {
             buffer_timeout_ms: 30_000,
             auto_switch: true,
             language: Language::Auto,
+            tray: true,
         }
     }
 }
@@ -119,6 +127,7 @@ impl Config {
                 "track-mouse" => assign_bool(value, &mut cfg.track_mouse),
                 "session-guard" => assign_bool(value, &mut cfg.session_guard),
                 "auto-switch" => assign_bool(value, &mut cfg.auto_switch),
+                "tray" => assign_bool(value, &mut cfg.tray),
                 "language" => Language::parse(value)
                     .map(|language| cfg.language = language)
                     .is_some(),
@@ -221,7 +230,10 @@ mod tests {
     fn shipped_config_matches_defaults() {
         let cfg = Config::parse(include_str!("../config/punto-rs.conf")).unwrap();
         assert_eq!(cfg.hotkey, Config::default().hotkey);
-        assert_eq!(cfg.pause_hotkey, Config::default().pause_hotkey);
+        // В Windows умолчание паузы своё (Shift+Pause), конфиг - для Linux.
+        if cfg!(target_os = "linux") {
+            assert_eq!(cfg.pause_hotkey, Config::default().pause_hotkey);
+        }
         assert!(cfg.session_guard);
         assert!(cfg.auto_switch);
         assert!(!Config::parse("auto-switch=no").unwrap().auto_switch);
@@ -251,7 +263,7 @@ mod tests {
             "hotkey=",
             "hotkey=insert+super",
             "hotkey=super+insert",
-            "phrase-hotkey=super+pause",
+            "phrase-hotkey=super+pause\npause-hotkey=super+pause",
             "layout-switch=insert",
             "hotkey=insert\nhotkey=pause",
             "unknown=1",
@@ -264,6 +276,7 @@ mod tests {
             "buffer-timeout=999",
             "session-guard=maybe",
             "language=de",
+            "tray=maybe",
         ] {
             assert!(Config::parse(text).is_err(), "accepted {text:?}");
         }

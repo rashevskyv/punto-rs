@@ -138,6 +138,7 @@ fn run_test(
         &SessionGuard::new(false),
         &Grabs::default(),
         &stopped,
+        &crate::tray::Shared::default(),
     );
     let _ = finished_tx.send(());
     watchdog.join().unwrap();

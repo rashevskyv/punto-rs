@@ -2,7 +2,9 @@
 
 use std::{io, time::Duration};
 
+#[cfg(target_os = "linux")]
 use evdev::uinput::VirtualDevice;
+#[cfg(target_os = "linux")]
 use evdev::{AttributeSet, EventType, InputEvent, KeyCode};
 
 use crate::{config::Config, keys, state::Stroke};
@@ -27,17 +29,25 @@ pub trait KeyOutput {
     fn emit_key(&mut self, code: u16, value: i32) -> io::Result<()>;
 }
 
+#[cfg(target_os = "linux")]
 impl KeyOutput for VirtualDevice {
     fn emit_key(&mut self, code: u16, value: i32) -> io::Result<()> {
         self.emit(&[InputEvent::new(EventType::KEY.0, code, value)])
     }
 }
 
-pub struct Injector<T: KeyOutput = VirtualDevice> {
+/// Вывод по умолчанию: виртуальная клавиатура `uinput` или `SendInput`.
+#[cfg(target_os = "linux")]
+type DefaultOutput = VirtualDevice;
+#[cfg(windows)]
+type DefaultOutput = crate::win::SendInputOutput;
+
+pub struct Injector<T: KeyOutput = DefaultOutput> {
     output: T,
     pressed: Vec<u16>,
 }
 
+#[cfg(target_os = "linux")]
 impl Injector {
     pub fn new(name: &str) -> io::Result<Self> {
         let mut set = AttributeSet::<KeyCode>::new();

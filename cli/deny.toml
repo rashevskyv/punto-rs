@@ -5,6 +5,10 @@ ignore = []
 allow = [
     "Apache-2.0",
     "MIT",
+    # ksni (значок в трее KDE).
+    "Unlicense",
+    # unicode-ident (через syn при сборке).
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.8
 
@@ -12,7 +16,8 @@ confidence-threshold = 0.8
 ignore = true
 
 [bans]
-multiple-versions = "deny"
+# Трей тянет zbus и tray-icon: дубли версий syn/miniz_oxide неизбежны.
+multiple-versions = "warn"
 wildcards = "allow"
 
 [sources]

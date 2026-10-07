@@ -178,15 +178,16 @@ fn no_correction_until_lost_device_is_resynchronized() {
 fn pause_and_session_changes_discard_sensitive_history() {
     let mut h = Harness::new();
     h.tap(30);
-    h.key(1, 125, 1);
+    let modifier = h.cfg.pause_hotkey[0];
+    h.key(1, modifier, 1);
     h.tap(119);
-    h.key(1, 125, 0);
+    h.key(1, modifier, 0);
     assert!(h.engine.paused);
     h.tap(48);
     assert!(h.fix().is_none());
-    h.key(1, 125, 1);
+    h.key(1, modifier, 1);
     h.tap(119);
-    h.key(1, 125, 0);
+    h.key(1, modifier, 0);
     assert!(!h.engine.paused);
     assert!(h.fix().is_none());
     h.tap(30);
@@ -385,3 +386,5 @@ fn test_auto_ukrainian_pair_fixes_ukrainian_and_keeps_english() {
     h.tap(keys::KEY_SPACE);
     assert!(h.ready().is_some());
 }
+
+mod control;

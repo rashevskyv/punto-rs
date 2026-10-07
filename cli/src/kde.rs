@@ -138,6 +138,7 @@ fn follow(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_bus::Bus;
     use dbus::channel::{MatchingReceiver, Sender};
     use std::sync::mpsc;
 
@@ -173,41 +174,6 @@ mod tests {
         assert_eq!(lang_at(&variant("winkeys"), 0), None);
         assert_eq!(lang_at(&variant("phonetic"), 0), None);
         assert_eq!(lang_at(&layouts(&["ru", "ua"]), 0), None);
-    }
-
-    /// Приватная шина: `dbus-daemon` на время теста, убивается при drop.
-    struct Bus {
-        daemon: std::process::Child,
-        address: String,
-    }
-    impl Bus {
-        fn start() -> Self {
-            use std::io::BufRead;
-            let mut daemon = std::process::Command::new("dbus-daemon")
-                .args(["--session", "--nofork", "--print-address=1"])
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .expect("нужен dbus-daemon");
-            let mut address = String::new();
-            std::io::BufReader::new(daemon.stdout.take().unwrap())
-                .read_line(&mut address)
-                .unwrap();
-            Self {
-                daemon,
-                address: address.trim().to_string(),
-            }
-        }
-        fn connect(address: &str) -> Result<Connection, dbus::Error> {
-            let mut channel = dbus::channel::Channel::open_private(address)?;
-            channel.register()?;
-            Ok(Connection::from(channel))
-        }
-    }
-    impl Drop for Bus {
-        fn drop(&mut self) {
-            let _ = self.daemon.kill();
-            let _ = self.daemon.wait();
-        }
     }
 
     /// Поддельный `org.kde.keyboard`: отвечает текущим состоянием, а каждая

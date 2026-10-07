@@ -11,10 +11,10 @@ use std::{
 
 use crate::{
     config::Config,
-    devices::{Grab, Grabs},
     engine::{DeviceEvent, Engine},
     injector::{Injector, KeyOutput, Pause},
-    session::SessionGuard,
+    platform::{Grab, Grabs, SessionGuard},
+    tray::Shared,
 };
 
 const CONTROL_INTERVAL: Duration = Duration::from_millis(10);
@@ -117,8 +117,23 @@ impl Capture<'_> {
     }
 }
 
+/// Передаёт трею состояние движка. Окна оболочки (панель, трей) не
+/// становятся программой, которую предлагает меню.
+fn report(engine: &Engine, shared: &Shared, is_shell: fn(&str) -> bool) {
+    shared.update(|status| {
+        status.paused = engine.paused;
+        status.excluded = engine.excluded();
+        status.layout = engine.shown_lang();
+        status.last_auto.clone_from(&engine.last_auto);
+        if let Some(app) = engine.app().filter(|app| !is_shell(app)) {
+            status.app = Some(app.to_string());
+        }
+    });
+}
+
 /// Главный цикл: копит ввод в движке и выполняет готовые коррекции.
 /// Возвращает `Ok` при остановке и ошибку записи в uinput.
+#[allow(clippy::too_many_arguments)]
 pub fn run<T: KeyOutput>(
     rx: &Receiver<Message>,
     mut injector: Injector<T>,
@@ -127,6 +142,7 @@ pub fn run<T: KeyOutput>(
     guard: &SessionGuard,
     grabs: &Grabs,
     stopped: &AtomicBool,
+    shared: &Shared,
 ) -> io::Result<()> {
     let mut engine = Engine::new(cfg, Instant::now());
     let mut generation = u64::MAX;
@@ -172,6 +188,7 @@ pub fn run<T: KeyOutput>(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
+        report(&engine, shared, crate::platform::is_shell);
         if let Some(fix) = engine.take_ready(cfg, Instant::now()) {
             if verbose {
                 let count = fix.strokes.len();
@@ -297,5 +314,7 @@ fn wait_for_input(
     }
 }
 
+// Тесты на захвате и сессии Linux.
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests;

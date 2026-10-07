@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -19,6 +20,8 @@ pub struct KeyEvent {
     pub value: i32,
 }
 
+// В Windows нет пересинхронизации и отключения устройств evdev.
+#[cfg_attr(windows, allow(dead_code))]
 #[derive(Debug)]
 pub enum DeviceEvent {
     Resynced {
@@ -32,56 +35,31 @@ pub enum DeviceEvent {
     LostEvents(u64),
     /// Пара раскладок с активной; `None` - неизвестна или не EN/RU, EN/UK.
     Layout(Option<Pair>),
+    /// Активная программа (класс окна `KWin` или имя `.exe`); `None` - неизвестна.
+    App(Option<String>),
+    Control(Control),
 }
 
-#[derive(Default)]
-struct HeldKeys {
-    keys: HashSet<(u64, u16)>,
+/// Команды из трея: пауза и пользовательские списки (в нижнем регистре).
+#[derive(Debug)]
+pub enum Control {
+    Pause(bool),
+    Exceptions(Arc<HashSet<String>>),
+    ExcludedApps(Arc<HashSet<String>>),
 }
 
-impl HeldKeys {
-    fn observe(&mut self, event: &DeviceEvent) {
-        match event {
-            DeviceEvent::Resynced {
-                device_id,
-                held_keys,
-            } => {
-                self.keys.retain(|(id, _)| id != device_id);
-                self.keys
-                    .extend(held_keys.iter().map(|code| (*device_id, *code)));
-            }
-            DeviceEvent::Key(event) => match event.value {
-                0 => {
-                    self.keys.remove(&(event.device_id, event.code));
-                }
-                1 => {
-                    self.keys.insert((event.device_id, event.code));
-                }
-                _ => {}
-            },
-            DeviceEvent::Disconnected(device_id) => self.keys.retain(|(id, _)| id != device_id),
-            _ => {}
-        }
-    }
-    fn matches(&self, hotkey: &[u16]) -> bool {
-        hotkey
-            .iter()
-            .all(|required| self.keys.iter().any(|(_, code)| code == required))
-            && self.keys.iter().all(|(_, code)| hotkey.contains(code))
-    }
-    fn shift(&self) -> bool {
-        self.keys.iter().any(|(_, code)| keys::is_shift(*code))
-    }
-    fn command(&self) -> bool {
-        self.keys
-            .iter()
-            .any(|(_, code)| keys::is_command_modifier(*code))
-    }
-}
+#[path = "engine/held.rs"]
+mod held;
+use held::HeldKeys;
 
 /// Начало исправления слова с `start`: короткие слова перед ним через один
 /// пробел в той же чужой раскладке (`F jy` -> `А он`) исправляются вместе с ним.
-fn short_words_before(phrase: &[Stroke], mut start: usize, pair: Pair) -> usize {
+fn short_words_before(
+    phrase: &[Stroke],
+    mut start: usize,
+    pair: Pair,
+    exceptions: &HashSet<String>,
+) -> usize {
     while start >= 2 && phrase[start - 1].code == keys::KEY_SPACE {
         let end = start - 1;
         let begin = phrase[..end]
@@ -92,7 +70,9 @@ fn short_words_before(phrase: &[Stroke], mut start: usize, pair: Pair) -> usize 
             .iter()
             .map(|stroke| (stroke.code, stroke.shift))
             .collect();
-        if letters.is_empty() || !layout::short_wrong(&letters, pair) {
+        let excepted =
+            layout::shown_word(&letters, pair.shown).is_some_and(|word| exceptions.contains(&word));
+        if letters.is_empty() || excepted || !layout::short_wrong(&letters, pair) {
             break;
         }
         start = begin;
@@ -118,6 +98,11 @@ pub struct Engine {
     last_input: Instant,
     unsynced: HashSet<u64>,
     layout: Option<Pair>,
+    exceptions: Arc<HashSet<String>>,
+    excluded_apps: Arc<HashSet<String>>,
+    app: Option<String>,
+    /// Слово последнего автоисправления, как оно было на экране.
+    pub last_auto: Option<String>,
 }
 
 impl Engine {
@@ -131,7 +116,45 @@ impl Engine {
             last_input: now,
             unsynced: HashSet::new(),
             layout: None,
+            exceptions: Arc::default(),
+            excluded_apps: Arc::default(),
+            app: None,
+            last_auto: None,
         }
+    }
+
+    /// Раскладка на экране, если пара известна.
+    pub fn shown_lang(&self) -> Option<layout::Lang> {
+        self.layout.map(|pair| pair.shown)
+    }
+
+    pub fn app(&self) -> Option<&str> {
+        self.app.as_deref()
+    }
+
+    /// Активная программа в списке исключений: ввод в ней не отслеживается.
+    pub fn excluded(&self) -> bool {
+        self.app
+            .as_ref()
+            .is_some_and(|app| self.excluded_apps.contains(&app.to_lowercase()))
+    }
+
+    /// Активная программа и команды трея; `true` - событие обработано.
+    fn apply_control(&mut self, event: &DeviceEvent) -> bool {
+        match event {
+            DeviceEvent::App(app) => self.app.clone_from(app),
+            DeviceEvent::Control(Control::Pause(paused)) => self.paused = *paused,
+            DeviceEvent::Control(Control::Exceptions(words)) => self.exceptions = words.clone(),
+            DeviceEvent::Control(Control::ExcludedApps(apps)) => self.excluded_apps = apps.clone(),
+            _ => return false,
+        }
+        self.invalidate();
+        true
+    }
+
+    /// Слово в пользовательских исключениях: на экране оставляем.
+    fn user_exception(&self, letters: &[(u16, bool)], pair: Pair) -> bool {
+        layout::shown_word(letters, pair.shown).is_some_and(|word| self.exceptions.contains(&word))
     }
 
     /// Коррекция переключила раскладку хоткеем: при двух раскладках - на другую.
@@ -152,9 +175,14 @@ impl Engine {
             .map(|stroke| (stroke.code, stroke.shift))
             .collect();
         // Ровно один пробел после слова: второй пробел слово уже не трогает.
-        if word.len() == letters.len() + 1 && layout::wrong_layout(&letters, pair) {
+        if word.len() == letters.len() + 1
+            && !self.user_exception(&letters, pair)
+            && layout::wrong_layout(&letters, pair)
+        {
+            self.last_auto = layout::shown_word(&letters, pair.shown);
             let phrase = self.buffer.phrase();
-            let start = short_words_before(phrase, phrase.len() - word.len(), pair);
+            let start =
+                short_words_before(phrase, phrase.len() - word.len(), pair, &self.exceptions);
             self.pending = Some(PendingFix {
                 strokes: phrase[start..].to_vec(),
                 phrase: false,
@@ -233,6 +261,9 @@ impl Engine {
             }
             return;
         }
+        if self.apply_control(&event) {
+            return;
+        }
         let DeviceEvent::Key(event) = event else {
             self.invalidate();
             return;
@@ -245,7 +276,7 @@ impl Engine {
             self.invalidate();
             return;
         }
-        if self.paused || self.session.is_none() || !self.unsynced.is_empty() {
+        if self.paused || self.excluded() || self.session.is_none() || !self.unsynced.is_empty() {
             self.invalidate();
             return;
         }
@@ -331,6 +362,8 @@ impl Engine {
         if let DeviceEvent::Layout(layout) = event {
             self.layout = *layout;
         }
+        // Команды трея и смена программы тоже действуют в любом поколении.
+        self.apply_control(event);
         self.invalidate();
     }
 

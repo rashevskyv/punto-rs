@@ -1,21 +1,40 @@
 [package]
 name = "punto-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.98"
-description = "Keyboard layout corrector daemon for Linux — retypes mistyped text in the right layout (Punto Switcher alternative)"
+description = "Keyboard layout corrector for Linux and Windows — retypes mistyped text in the right layout (Punto Switcher alternative)"
 license = "MIT"
-repository = "https://github.com/netherguy4/punto-rs"
+repository = "https://github.com/rashevskyv/punto-rs"
 readme = "../README.md"
-keywords = ["keyboard", "layout", "evdev", "uinput", "linux"]
+keywords = ["keyboard", "layout", "evdev", "linux", "windows"]
 categories = ["command-line-utilities"]
 publish = false
 
 [dependencies]
+
+[target.'cfg(target_os = "linux")'.dependencies]
 evdev = "=0.13.2"
 dbus = { version = "=0.9.12", features = ["vendored"] }
 libc = "=0.2.189"
 signal-hook = "=0.3.18"
+ksni = { version = "=0.3.6", default-features = false, features = ["async-io", "blocking"] }
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = { version = "=0.26.1", default-features = false }
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # CI runner: 14 GB SSD. Полный debug по deps раздувает target/debug и llvm-cov-target.
 [profile.dev]
@@ -36,7 +55,7 @@ lto = true
 strip = true
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
