@@ -1,5 +1,7 @@
 //! Классификация скан-кодов клавиатуры (Linux input-event-codes.h).
 
+use crate::layout::{self, Lang};
+
 pub const KEY_BACKSPACE: u16 = 14;
 pub const KEY_TAB: u16 = 15;
 pub const KEY_ENTER: u16 = 28;
@@ -64,42 +66,98 @@ pub fn is_command_modifier(code: u16) -> bool {
     )
 }
 
-/// Клавиша из конфига: скан-код числом либо имя.
+/// Имена клавиш без учёта регистра; первое имя кода - основное, оно же
+/// в меню и в конфиге. Буквы и цифры - по символу в раскладке US.
+const NAMES: [(&str, u16); 48] = [
+    ("Insert", KEY_INSERT),
+    ("Ins", KEY_INSERT),
+    ("Pause", 119),
+    ("Break", 119),
+    ("ScrollLock", 70),
+    ("CapsLock", 58),
+    ("Menu", 127),
+    ("Compose", 127),
+    ("Space", KEY_SPACE),
+    ("Tab", KEY_TAB),
+    ("Enter", KEY_ENTER),
+    ("Backspace", KEY_BACKSPACE),
+    ("Esc", 1),
+    ("Delete", 111),
+    ("Home", 102),
+    ("End", 107),
+    ("PageUp", 104),
+    ("PageDown", 109),
+    ("Up", 103),
+    ("Down", 108),
+    ("Left", 105),
+    ("Right", 106),
+    ("Ctrl", KEY_LEFTCTRL),
+    ("LeftCtrl", KEY_LEFTCTRL),
+    ("RightCtrl", KEY_RIGHTCTRL),
+    ("Shift", KEY_LEFTSHIFT),
+    ("LeftShift", KEY_LEFTSHIFT),
+    ("RightShift", KEY_RIGHTSHIFT),
+    ("Alt", KEY_LEFTALT),
+    ("LeftAlt", KEY_LEFTALT),
+    ("RightAlt", KEY_RIGHTALT),
+    ("AltGr", KEY_RIGHTALT),
+    ("Super", KEY_LEFTMETA),
+    ("LeftMeta", KEY_LEFTMETA),
+    ("Win", KEY_LEFTMETA),
+    ("RightMeta", KEY_RIGHTMETA),
+    ("F1", 59),
+    ("F2", 60),
+    ("F3", 61),
+    ("F4", 62),
+    ("F5", 63),
+    ("F6", 64),
+    ("F7", 65),
+    ("F8", 66),
+    ("F9", 67),
+    ("F10", 68),
+    ("F11", 87),
+    ("F12", 88),
+];
+
+/// Клавиша из конфига: имя, символ в раскладке US (`q`, `1`) или скан-код
+/// числом из двух и более цифр (`125`).
 pub fn key_from_spec(spec: &str) -> Option<u16> {
-    if let Ok(code) = spec.parse::<u16>() {
+    if let Ok(code) = spec.parse::<u16>()
+        && spec.len() > 1
+    {
         return (1..=255).contains(&code).then_some(code);
     }
-    let code = match spec.to_ascii_lowercase().as_str() {
-        "insert" | "ins" => KEY_INSERT,
-        "pause" | "break" => 119,
-        "scrolllock" => 70,
-        "capslock" => 58,
-        "menu" | "compose" => 127,
-        "space" => KEY_SPACE,
-        "tab" => KEY_TAB,
-        "leftctrl" | "ctrl" => KEY_LEFTCTRL,
-        "rightctrl" => KEY_RIGHTCTRL,
-        "leftshift" | "shift" => KEY_LEFTSHIFT,
-        "rightshift" => KEY_RIGHTSHIFT,
-        "leftalt" | "alt" => KEY_LEFTALT,
-        "rightalt" | "altgr" => KEY_RIGHTALT,
-        "leftmeta" | "super" | "win" => KEY_LEFTMETA,
-        "rightmeta" => KEY_RIGHTMETA,
-        "f1" => 59,
-        "f2" => 60,
-        "f3" => 61,
-        "f4" => 62,
-        "f5" => 63,
-        "f6" => 64,
-        "f7" => 65,
-        "f8" => 66,
-        "f9" => 67,
-        "f10" => 68,
-        "f11" => 87,
-        "f12" => 88,
-        _ => return None,
+    if let Some((_, code)) = NAMES
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(spec))
+    {
+        return Some(*code);
+    }
+    let mut chars = spec.chars();
+    let (Some(symbol), None) = (chars.next(), chars.next()) else {
+        return None;
     };
-    Some(code)
+    let symbol = symbol.to_ascii_lowercase();
+    (2..=53).find(|&code| layout::key_char(Lang::En, code, false) == Some(symbol))
+}
+
+/// Имя клавиши для меню и конфига: `Insert`, `Q`, `F12`, иначе скан-код.
+pub fn key_name(code: u16) -> String {
+    NAMES
+        .iter()
+        .find(|(_, known)| *known == code)
+        .map(|(name, _)| (*name).to_string())
+        .or_else(|| layout::key_char(Lang::En, code, false).map(|c| c.to_ascii_uppercase().into()))
+        .unwrap_or_else(|| code.to_string())
+}
+
+/// Комбинация именами: `Ctrl+Shift+Q`; `parse_combo` читает её обратно.
+pub fn combo_name(combo: &[u16]) -> String {
+    combo
+        .iter()
+        .map(|&code| key_name(code))
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 /// Разбор комбинации вида `125+57` или `super+space` в список скан-кодов.
@@ -117,5 +175,28 @@ pub fn parse_combo(spec: &str) -> Option<Vec<u16>> {
         None
     } else {
         Some(codes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_combo_name_round_trips_names_letters_and_codes() {
+        for spec in [
+            "Ctrl+Shift+Q",
+            "Alt+F12",
+            "Insert",
+            "Ctrl+1",
+            "Pause",
+            "Ctrl+Alt+200",
+        ] {
+            let combo = parse_combo(spec).unwrap();
+            assert_eq!(combo_name(&combo), spec);
+        }
+        assert_eq!(parse_combo("ctrl+shift+q"), Some(vec![29, 42, 16]));
+        assert_eq!(parse_combo("leftctrl+ins"), parse_combo("Ctrl+Insert"));
+        assert_eq!(key_from_spec("qq"), None);
     }
 }

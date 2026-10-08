@@ -2,6 +2,24 @@
 //! оперирует движок. Для основного блока они совпадают; клавиши с префиксом
 //! E0 (`extended`) и Pause сопоставляются таблицей.
 
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MAPVK_VK_TO_VSC_EX, MapVirtualKeyW};
+
+use crate::keys;
+
+/// Комбинация из окна выбора: модификаторы `ctrl+shift+alt` и код VK клавиши.
+pub fn vk_combo(modifiers: &str, vk: u32) -> Option<Vec<u16>> {
+    // SAFETY: функция только переводит код клавиши в скан-код.
+    let scan = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX) };
+    let key = evdev_code(vk, scan & 0xff, scan & 0xff00 == 0xe000)?;
+    let mut combo: Vec<u16> = modifiers
+        .split('+')
+        .filter(|name| !name.is_empty())
+        .map(keys::key_from_spec)
+        .collect::<Option<_>>()?;
+    combo.push(key);
+    Some(combo)
+}
+
 pub const VK_PAUSE: u32 = 0x13;
 pub const VK_NUMLOCK: u32 = 0x90;
 const KEY_PAUSE: u16 = 119;

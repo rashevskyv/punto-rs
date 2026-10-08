@@ -34,6 +34,7 @@ use windows_sys::Win32::{
 };
 
 pub use hook::{Grab, Grabs, set_word_hotkey};
+pub use keymap::vk_combo;
 pub use output::SendInputOutput;
 
 use crate::{

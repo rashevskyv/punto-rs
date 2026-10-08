@@ -142,13 +142,21 @@ fn test_tray_hotkey_choice_written_to_config_and_applied() {
         .update(|status| status.hotkey = vec![crate::keys::KEY_INSERT]);
     let menu = labels(&tray.menu());
     assert!(
-        menu.contains(&"Клавиша исправления: Insert".to_string()),
+        menu.contains(&"Клавиша исправления: Insert…".to_string()),
         "{menu:?}"
     );
-    tray.activate(Action::SetHotkey("pause"));
+    tray.activate(Action::SetHotkey(vec![119]));
     assert_eq!(
         std::fs::read_to_string(dir.join("config.conf")).unwrap(),
-        "hotkey=pause\n"
+        "hotkey=Pause\n"
+    );
+    // Комбинация, совпавшая с другой, не сохраняется: конфиг остаётся прежним.
+    tray.activate(Action::SetHotkey(
+        crate::keys::parse_combo("super+insert").unwrap(),
+    ));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.conf")).unwrap(),
+        "hotkey=Pause\n"
     );
     let applied = events.lock().unwrap().iter().any(
         |event| matches!(event, DeviceEvent::Control(Control::Hotkey(combo)) if combo == &[119]),

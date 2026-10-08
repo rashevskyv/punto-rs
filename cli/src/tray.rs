@@ -86,7 +86,11 @@ pub enum Action {
     IncludeApp(String),
     OpenWords,
     OpenApps,
-    SetHotkey(&'static str),
+    #[cfg_attr(windows, allow(dead_code))]
+    SetHotkey(Vec<u16>),
+    #[cfg(windows)]
+    RecordHotkey,
+    #[cfg(not(windows))]
     OpenConfig,
     #[cfg(windows)]
     ToggleAutostart,
@@ -336,7 +340,10 @@ impl Tray {
             Action::IncludeApp(app) => self.apps.remove(&app),
             Action::OpenWords => open_file(&self.words.path, &words_header()),
             Action::OpenApps => open_file(&self.apps.path, &apps_header()),
-            Action::SetHotkey(name) => self.set_hotkey(name),
+            Action::SetHotkey(combo) => self.set_hotkey(combo),
+            #[cfg(windows)]
+            Action::RecordHotkey => self.record_hotkey(),
+            #[cfg(not(windows))]
             Action::OpenConfig => open_file(&self.config, ""),
             #[cfg(windows)]
             Action::ToggleAutostart => {
@@ -354,16 +361,6 @@ impl Tray {
             );
         }
         self.push_lists();
-    }
-
-    /// Записывает клавишу исправления в конфиг и сразу применяет её.
-    fn set_hotkey(&self, name: &str) -> std::io::Result<()> {
-        crate::config::set_value(&self.config, "hotkey", name)?;
-        let combo = crate::keys::parse_combo(name).unwrap_or_default();
-        #[cfg(windows)]
-        crate::win::set_word_hotkey(combo.clone());
-        (self.send)(DeviceEvent::Control(Control::Hotkey(combo)));
-        Ok(())
     }
 
     /// Пауза на `duration`; ручное снятие или новая пауза отменяют таймер.

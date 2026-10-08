@@ -290,7 +290,7 @@ mod tests {
     fn rejects_invalid_and_ambiguous_config() {
         for text in [
             "hotkey=hyperkey",
-            "hotkey=0",
+            "hotkey=00",
             "layout-switch=65535",
             "hotkey=256",
             "hotkey=super+super+insert",
