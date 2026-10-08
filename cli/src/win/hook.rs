@@ -1,6 +1,8 @@
 //! Низкоуровневые хуки клавиатуры и мыши: аналог чтения evdev. На время
 //! коррекции (`Grab`) нажатия не доходят до программ и переигрываются после,
-//! как при `EVIOCGRAB`. Свои нажатия (`SendInput`) хук пропускает по флагу.
+//! как при `EVIOCGRAB`. Свои нажатия (`SendInput`) хук пропускает по метке
+//! `OWN_INPUT`; нажатия других программ (переназначение клавиш в `PowerToys`,
+//! `AutoHotkey`) обрабатываются как настоящие.
 
 use std::{
     collections::HashSet,
@@ -20,13 +22,12 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-        LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW, TranslateMessage,
-        WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
-        WM_SYSKEYDOWN, WM_XBUTTONDOWN,
+        MSG, SetWindowsHookExW, TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN,
+        WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_XBUTTONDOWN,
     },
 };
 
-use super::keymap::evdev_code;
+use super::{keymap::evdev_code, output::OWN_INPUT};
 use crate::{
     daemon::Message,
     engine::{DeviceEvent, KeyEvent},
@@ -218,7 +219,7 @@ unsafe extern "system" fn keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) ->
             u32::try_from(wparam).unwrap_or(0),
             WM_KEYDOWN | WM_SYSKEYDOWN
         );
-        if info.flags & LLKHF_INJECTED == 0
+        if info.dwExtraInfo != OWN_INPUT
             && let Some(key) =
                 evdev_code(info.vkCode, info.scanCode, info.flags & LLKHF_EXTENDED != 0)
             && on_key(hook, key, down)
@@ -238,11 +239,7 @@ unsafe extern "system" fn mouse(code: i32, wparam: WPARAM, lparam: LPARAM) -> LR
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
         )
     {
-        // SAFETY: для WH_MOUSE_LL lparam указывает на MSLLHOOKSTRUCT.
-        let info = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
-        if info.flags & LLMHF_INJECTED == 0 {
-            send(hook, DeviceEvent::Click);
-        }
+        send(hook, DeviceEvent::Click);
     }
     // SAFETY: см. выше.
     unsafe { CallNextHookEx(null_mut(), code, wparam, lparam) }

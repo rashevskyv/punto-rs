@@ -65,6 +65,14 @@ impl Tray {
             ));
             return Ok(());
         }
+        // Alt+Tab, Alt+F4, Ctrl+Esc нужны самой Windows.
+        if !modifiers.is_empty() && matches!(*key, keys::KEY_TAB | 1 | 62) {
+            super::dialogs::message(tr!(
+                "Эту комбинацию использует Windows: выберите другую.",
+                "Цю комбінацію використовує Windows: оберіть іншу."
+            ));
+            return Ok(());
+        }
         self.set_hotkey(combo).inspect_err(|err| {
             super::dialogs::message(&tr!(
                 format!("Комбинация не сохранена:\n{err}"),

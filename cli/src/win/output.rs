@@ -13,6 +13,10 @@ use crate::injector::KeyOutput;
 
 pub struct SendInputOutput;
 
+/// Метка своих нажатий в `dwExtraInfo`: хук пропускает только их, а не
+/// все синтетические (`LLKHF_INJECTED`).
+pub const OWN_INPUT: usize = 0x5055_4e54;
+
 fn keyboard_input(vk: u16, scan: u16, flags: u32) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
@@ -22,7 +26,7 @@ fn keyboard_input(vk: u16, scan: u16, flags: u32) -> INPUT {
                 wScan: scan,
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: 0,
+                dwExtraInfo: OWN_INPUT,
             },
         },
     }
