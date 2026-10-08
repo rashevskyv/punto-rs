@@ -265,22 +265,6 @@ fn test_auto_wrong_word_then_space_schedules_word_with_space() {
 }
 
 #[test]
-fn test_held_enter_fixes_wrong_word_without_space_and_ends_phrase() {
-    let mut h = Harness::on_layout(Some(EN_UK));
-    h.type_codes(&PRYVIT_ON_EN);
-    assert!(h.engine.wants_enter(&h.cfg));
-    let strokes = h.engine.held_enter(&h.cfg, h.now);
-    let codes: Vec<u16> = strokes.iter().map(|stroke| stroke.code).collect();
-    assert_eq!(codes, PRYVIT_ON_EN);
-    assert!(!h.engine.wants_enter(&h.cfg));
-    assert!(h.engine.held_enter(&h.cfg, h.now).is_empty());
-    // После пробела слово уже исправлено на пробеле: Enter не придерживается.
-    h.type_codes(&PRYVIT_ON_EN);
-    h.tap(keys::KEY_SPACE);
-    assert!(!h.engine.wants_enter(&h.cfg));
-}
-
-#[test]
 fn test_auto_single_letter_alone_kept_before_fixed_word_joins_fix() {
     // «f jy» в EN = «а он»; «a jy» - английское «a» остаётся.
     const F: u16 = 33;
@@ -404,3 +388,4 @@ fn test_auto_ukrainian_pair_fixes_ukrainian_and_keeps_english() {
 }
 
 mod control;
+mod enter;
