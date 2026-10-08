@@ -2,6 +2,7 @@
 //!
 //! Выбирается ключом `language` конфига; `auto` смотрит на локаль окружения
 //! (`LC_ALL`, `LC_MESSAGES`, `LANG`): `uk*` - украинский, иначе русский.
+//! В Windows `auto` - украинский и при украинском интерфейсе или раскладке.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -42,6 +43,8 @@ impl Language {
 /// Устанавливает язык сообщений процесса.
 pub fn apply(language: Language) {
     let ukrainian = language.is_ukrainian(|name| std::env::var(name).ok());
+    #[cfg(windows)]
+    let ukrainian = ukrainian || (language == Language::Auto && crate::win::ukrainian_user());
     UKRAINIAN.store(ukrainian, Ordering::Relaxed);
 }
 

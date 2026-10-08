@@ -66,6 +66,12 @@ impl Grabs {
     }
 }
 
+impl Grabs {
+    /// evdev читается пассивно: Enter уже у композитора, придержать его нельзя.
+    #[allow(clippy::unused_self)]
+    pub fn hold_enter(&self, _hold: bool) {}
+}
+
 /// Действующий захват клавиатур.
 pub struct Grab<'a>(&'a Grabs);
 

@@ -30,11 +30,15 @@ use super::keymap::evdev_code;
 use crate::{
     daemon::Message,
     engine::{DeviceEvent, KeyEvent},
+    keys,
 };
 
-/// Захват ввода на время коррекции.
+/// Захват ввода на время коррекции и разрешение придержать Enter.
 #[derive(Clone, Default)]
-pub struct Grabs(Arc<AtomicBool>);
+pub struct Grabs {
+    capture: Arc<AtomicBool>,
+    hold_enter: Arc<AtomicBool>,
+}
 
 pub struct Grab<'a>(&'a Grabs);
 
@@ -42,20 +46,27 @@ impl Grabs {
     // Тот же интерфейс, что у захвата evdev, который может не удаться.
     #[allow(clippy::unnecessary_wraps)]
     pub fn grab(&self) -> io::Result<Grab<'_>> {
-        self.0.store(true, Ordering::SeqCst);
+        self.capture.store(true, Ordering::SeqCst);
         Ok(Grab(self))
+    }
+
+    /// Слово перед курсором в чужой раскладке: Enter придерживается, пока
+    /// оно не исправлено.
+    pub fn hold_enter(&self, hold: bool) {
+        self.hold_enter.store(hold, Ordering::SeqCst);
     }
 }
 
 impl Drop for Grab<'_> {
     fn drop(&mut self) {
-        self.0.0.store(false, Ordering::SeqCst);
+        self.0.capture.store(false, Ordering::SeqCst);
     }
 }
 
 struct Hook {
     tx: SyncSender<Message>,
     capture: Arc<AtomicBool>,
+    hold_enter: Arc<AtomicBool>,
     held: Mutex<HashSet<u16>>,
     /// Горячие клавиши punto-rs: программам их нажатие не нужно (Insert
     /// иначе включает режим замены).
@@ -83,6 +94,13 @@ fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
         held.remove(&key);
         0
     };
+    // Enter без модификаторов после слова в чужой раскладке: демон нажмёт
+    // его сам после исправления.
+    let held_enter = value == 1
+        && key == keys::KEY_ENTER
+        && held.len() == 1
+        && hook.hold_enter.load(Ordering::SeqCst)
+        && !hook.capture.load(Ordering::SeqCst);
     let hotkey = down
         && hook.hotkeys.iter().any(|combo| {
             combo.last() == Some(&key)
@@ -92,21 +110,26 @@ fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
     drop(held);
     send(
         hook,
-        DeviceEvent::Key(KeyEvent {
-            device_id: 1,
-            code: key,
-            value,
-        }),
+        if held_enter {
+            DeviceEvent::HeldEnter
+        } else {
+            DeviceEvent::Key(KeyEvent {
+                device_id: 1,
+                code: key,
+                value,
+            })
+        },
     );
     let mut swallowed = hook
         .swallowed
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    if hotkey {
+    if hotkey || held_enter {
         swallowed.insert(key);
     }
     let release = !down && swallowed.remove(&key);
     hotkey
+        || held_enter
         || release
         || hook.capture.load(Ordering::SeqCst)
         || (value == 2 && swallowed.contains(&key))
@@ -154,11 +177,13 @@ unsafe extern "system" fn mouse(code: i32, wparam: WPARAM, lparam: LPARAM) -> LR
 
 /// Ставит хуки в своём потоке с очередью сообщений: без неё они не работают.
 pub fn start(tx: SyncSender<Message>, grabs: &Grabs, hotkeys: Vec<Vec<u16>>, track_mouse: bool) {
-    let capture = grabs.0.clone();
+    let capture = grabs.capture.clone();
+    let hold_enter = grabs.hold_enter.clone();
     thread::spawn(move || {
         let _ = HOOK.set(Hook {
             tx,
             capture,
+            hold_enter,
             held: Mutex::default(),
             hotkeys,
             swallowed: Mutex::default(),

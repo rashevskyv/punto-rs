@@ -20,6 +20,8 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{ERROR_ALREADY_EXISTS, GetLastError, INVALID_HANDLE_VALUE},
+    Globalization::GetUserDefaultUILanguage,
+    Media::timeBeginPeriod,
     System::{
         Console::{
             ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE,
@@ -58,6 +60,16 @@ impl SessionGuard {
             session: Some("windows".into()),
         }
     }
+}
+
+/// Интерфейс Windows на украинском или установлена украинская раскладка:
+/// переменных локали, как в Linux, здесь нет.
+pub fn ukrainian_user() -> bool {
+    // SAFETY: функция только читает настройку пользователя.
+    let ui = unsafe { GetUserDefaultUILanguage() };
+    std::iter::once(ui)
+        .chain(watch::installed())
+        .any(|langid| langid & 0x3ff == watch::UKRAINIAN)
 }
 
 pub fn is_shell(app: &str) -> bool {
@@ -120,6 +132,10 @@ pub fn serve(cfg: &Config, verbose: bool, config_dir: &Path, console: bool) {
     if !single_instance() {
         die(tr!("punto-rs уже запущен", "punto-rs уже запущено"));
     }
+    // Без этого паузы короче 15,6 мс (key-delay) растягиваются до такта
+    // системного таймера, и исправление слова занимает полсекунды.
+    // SAFETY: только точность системного таймера на время жизни процесса.
+    unsafe { timeBeginPeriod(1) };
     let stopped = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::sync_channel::<Message>(1024);
     let grabs = Grabs::default();

@@ -93,6 +93,12 @@ impl<T: KeyOutput> Injector<T> {
         }
     }
 
+    /// Нажимает и отпускает клавишу.
+    pub fn press(&mut self, code: u16) -> io::Result<()> {
+        self.emit(code, 1)?;
+        self.emit(code, 0)
+    }
+
     /// Держит ли виртуальная клавиатура нажатые клавиши.
     pub fn holding(&self) -> bool {
         !self.pressed.is_empty()

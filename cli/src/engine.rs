@@ -38,6 +38,10 @@ pub enum DeviceEvent {
     /// Активная программа (класс окна `KWin` или имя `.exe`); `None` - неизвестна.
     App(Option<String>),
     Control(Control),
+    /// Enter, который хук не передал программе (Windows): его надо нажать
+    /// заново, после исправления слова перед ним.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    HeldEnter,
 }
 
 /// Команды из трея: пауза и пользовательские списки (в нижнем регистре).
@@ -87,6 +91,17 @@ pub struct PendingFix {
     pub auto: bool,
     trigger: u16,
     ready_at: Option<Instant>,
+}
+
+impl PendingFix {
+    /// Вид исправления для журнала.
+    pub fn kind(&self) -> &'static str {
+        match (self.auto, self.phrase) {
+            (true, _) => tr!("авто", "авто"),
+            (false, true) => tr!("фраза", "фраза"),
+            (false, false) => tr!("слово", "слово"),
+        }
+    }
 }
 
 pub struct Engine {
@@ -163,34 +178,61 @@ impl Engine {
         self.layout = self.layout.map(Pair::swapped);
     }
 
-    /// Пробел после слова в чужой раскладке -> автоматическая коррекция слова с пробелом.
-    fn check_last_word(&mut self, cfg: &Config) {
-        let Some(pair) = self.layout.filter(|_| cfg.auto_switch) else {
-            return;
-        };
+    /// Последнее слово в чужой раскладке, после которого ровно `spaces`
+    /// пробелов: начало исправления во фразе и слово, как оно на экране.
+    fn wrong_last_word(&self, cfg: &Config, spaces: usize) -> Option<(usize, Option<String>)> {
+        let pair = self.layout.filter(|_| cfg.auto_switch)?;
         let word = self.buffer.last_word();
         let letters: Vec<(u16, bool)> = word
             .iter()
             .take_while(|stroke| !keys::is_separator(stroke.code))
             .map(|stroke| (stroke.code, stroke.shift))
             .collect();
-        // Ровно один пробел после слова: второй пробел слово уже не трогает.
-        if word.len() == letters.len() + 1
-            && !self.user_exception(&letters, pair)
-            && layout::wrong_layout(&letters, pair)
+        if letters.is_empty()
+            || word.len() != letters.len() + spaces
+            || self.user_exception(&letters, pair)
+            || !layout::wrong_layout(&letters, pair)
         {
-            self.last_auto = layout::shown_word(&letters, pair.shown);
-            let phrase = self.buffer.phrase();
-            let start =
-                short_words_before(phrase, phrase.len() - word.len(), pair, &self.exceptions);
+            return None;
+        }
+        let phrase = self.buffer.phrase();
+        let start = short_words_before(phrase, phrase.len() - word.len(), pair, &self.exceptions);
+        Some((start, layout::shown_word(&letters, pair.shown)))
+    }
+
+    /// Пробел после слова в чужой раскладке -> автоматическая коррекция слова с пробелом.
+    fn check_last_word(&mut self, cfg: &Config) {
+        // Ровно один пробел после слова: второй пробел слово уже не трогает.
+        if let Some((start, shown)) = self.wrong_last_word(cfg, 1) {
+            self.last_auto = shown;
             self.pending = Some(PendingFix {
-                strokes: phrase[start..].to_vec(),
+                strokes: self.buffer.phrase()[start..].to_vec(),
                 phrase: false,
                 auto: true,
                 trigger: keys::KEY_SPACE,
                 ready_at: None,
             });
         }
+    }
+
+    /// Придержать ли Enter до исправления: слово перед ним в чужой раскладке.
+    pub fn wants_enter(&self, cfg: &Config) -> bool {
+        self.pending.is_none() && self.wrong_last_word(cfg, 0).is_some()
+    }
+
+    /// Enter, придержанный хуком: нажатия слова перед ним, если его надо
+    /// исправить до Enter. Фраза на Enter заканчивается.
+    pub fn held_enter(&mut self, cfg: &Config, now: Instant) -> Vec<Stroke> {
+        self.expire(cfg, now);
+        let strokes = self
+            .wrong_last_word(cfg, 0)
+            .map(|(start, shown)| {
+                self.last_auto = shown;
+                self.buffer.phrase()[start..].to_vec()
+            })
+            .unwrap_or_default();
+        self.invalidate();
+        strokes
     }
 
     fn observe_device_state(&mut self, event: &DeviceEvent) {

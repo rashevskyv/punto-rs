@@ -32,12 +32,15 @@ use crate::{
 /// Панель задач и область уведомлений: щелчок по трею не меняет программу.
 pub const TASKBAR: &str = "@taskbar";
 
+/// Основной язык `LANGID` украинского.
+pub const UKRAINIAN: u16 = 0x22;
+
 /// Язык раскладки по основному языку `LANGID`.
 fn lang(langid: u16) -> Option<Lang> {
     match langid & 0x3ff {
         0x09 => Some(Lang::En),
         0x19 => Some(Lang::Ru),
-        0x22 => Some(Lang::Uk),
+        UKRAINIAN => Some(Lang::Uk),
         _ => None,
     }
 }
@@ -102,7 +105,7 @@ fn is_taskbar(window: HWND) -> bool {
     )
 }
 
-fn installed() -> Vec<u16> {
+pub fn installed() -> Vec<u16> {
     // SAFETY: сначала размер списка, затем буфер нужной длины.
     unsafe {
         let count = GetKeyboardLayoutList(0, null_mut());
@@ -148,7 +151,8 @@ pub fn start(send: Sender, stopped: Arc<AtomicBool>) {
                     app = Some(name);
                 }
             }
-            thread::sleep(Duration::from_millis(50));
+            // Конец паузы switch-delay ждёт этого опроса: шаг короткий.
+            thread::sleep(Duration::from_millis(10));
         }
     });
 }

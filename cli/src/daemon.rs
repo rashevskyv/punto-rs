@@ -13,7 +13,9 @@ use crate::{
     config::Config,
     engine::{DeviceEvent, Engine},
     injector::{Injector, KeyOutput, Pause},
+    keys,
     platform::{Grab, Grabs, SessionGuard},
+    state::Stroke,
     tray::Shared,
 };
 
@@ -103,10 +105,12 @@ impl Capture<'_> {
         engine: &mut Engine,
         cfg: &Config,
     ) -> io::Result<()> {
-        if let DeviceEvent::Key(key) = &message.event
-            && (captured || key.value == 0)
-        {
-            injector.forward(key.code, key.value)?;
+        match &message.event {
+            DeviceEvent::Key(key) if captured || key.value == 0 => {
+                injector.forward(key.code, key.value)?;
+            }
+            DeviceEvent::HeldEnter => injector.press(keys::KEY_ENTER)?,
+            _ => {}
         }
         if message.generation == self.generation {
             engine.observe(message.event, cfg, Instant::now());
@@ -129,6 +133,36 @@ fn report(engine: &Engine, shared: &Shared, is_shell: fn(&str) -> bool) {
             status.app = Some(app.to_string());
         }
     });
+}
+
+/// Передаёт движку событие текущего (`current`) или старого поколения.
+/// Придержанный Enter возвращает нажатия слова, исправляемого до него.
+fn observe(
+    engine: &mut Engine,
+    message: Message,
+    current: bool,
+    cfg: &Config,
+) -> Option<Vec<Stroke>> {
+    if matches!(message.event, DeviceEvent::HeldEnter) {
+        return Some(engine.held_enter(cfg, Instant::now()));
+    }
+    let paused = engine.paused;
+    if current {
+        engine.observe(message.event, cfg, Instant::now());
+    } else {
+        engine.discard(&message.event);
+    }
+    if engine.paused != paused {
+        log!(
+            "punto-rs: {}",
+            if engine.paused {
+                tr!("пауза включена", "паузу ввімкнено")
+            } else {
+                tr!("пауза выключена", "паузу вимкнено")
+            }
+        );
+    }
+    None
 }
 
 /// Главный цикл: копит ввод в движке и выполняет готовые коррекции.
@@ -166,37 +200,28 @@ pub fn run<T: KeyOutput>(
             );
             engine.observe(DeviceEvent::Session(context.session), cfg, Instant::now());
         }
-        match rx.recv_timeout(CONTROL_INTERVAL) {
+        let held_enter = match rx.recv_timeout(CONTROL_INTERVAL) {
             Ok(message) => {
-                let paused = engine.paused;
-                if message.generation == generation && guard.context().generation == generation {
-                    engine.observe(message.event, cfg, Instant::now());
-                } else {
-                    engine.discard(&message.event);
-                }
-                if engine.paused != paused {
-                    log!(
-                        "punto-rs: {}",
-                        if engine.paused {
-                            tr!("пауза включена", "паузу ввімкнено")
-                        } else {
-                            tr!("пауза выключена", "паузу вимкнено")
-                        }
-                    );
-                }
+                let current =
+                    message.generation == generation && guard.context().generation == generation;
+                let held_enter = observe(&mut engine, message, current, cfg);
+                grabs.hold_enter(cfg!(windows) && engine.wants_enter(cfg));
+                held_enter
             }
-            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
-        }
+        };
         report(&engine, shared, crate::platform::is_shell);
-        if let Some(fix) = engine.take_ready(cfg, Instant::now()) {
-            if verbose {
-                let count = fix.strokes.len();
-                let kind = match (fix.auto, fix.phrase) {
-                    (true, _) => tr!("авто", "авто"),
-                    (false, true) => tr!("фраза", "фраза"),
-                    (false, false) => tr!("слово", "слово"),
-                };
+        // Придержанный Enter нажимается после исправления, даже пустого или прерванного.
+        let fix = match held_enter {
+            Some(strokes) => Some(("Enter", strokes, true)),
+            None => engine
+                .take_ready(cfg, Instant::now())
+                .map(|fix| (fix.kind(), fix.strokes, false)),
+        };
+        if let Some((kind, strokes, enter)) = fix {
+            if verbose && !strokes.is_empty() {
+                let count = strokes.len();
                 tr!(
                     log!("punto-rs: исправляю {count} нажатий ({kind})"),
                     log!("punto-rs: виправляю {count} натискань ({kind})")
@@ -211,6 +236,9 @@ pub fn run<T: KeyOutput>(
                         log!("punto-rs: клавіатури не захоплено, виправлення пропущено: {err}")
                     );
                     engine.invalidate();
+                    if enter {
+                        injector.press(keys::KEY_ENTER)?;
+                    }
                     continue;
                 }
             };
@@ -223,10 +251,11 @@ pub fn run<T: KeyOutput>(
                 queue: Vec::new(),
                 switched: false,
             };
-            let result = injector.fix(&fix.strokes, cfg, |pause| {
+            let result = injector.fix(&strokes, cfg, |pause| {
                 wait_for_input(&mut capture, &mut engine, cfg, pause)
             });
             match result {
+                Ok(()) if strokes.is_empty() => {}
                 Ok(()) => engine.switched(),
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {
                     engine.invalidate();
@@ -240,7 +269,11 @@ pub fn run<T: KeyOutput>(
                 }
                 Err(err) => return Err(err),
             }
+            if enter {
+                injector.press(keys::KEY_ENTER)?;
+            }
             capture.replay(grab, &mut injector, &mut engine, cfg)?;
+            grabs.hold_enter(cfg!(windows) && engine.wants_enter(cfg));
         }
     }
 }
@@ -293,9 +326,15 @@ fn wait_for_input(
             }
         };
         if let Some(message) = message {
+            // Придержанный Enter программа не видела, когда бы он ни пришёл.
             let captured = message.generation == capture.generation
-                && message.at >= capture.grabbed_at
-                && matches!(message.event, DeviceEvent::Key(_) | DeviceEvent::Layout(_));
+                && match message.event {
+                    DeviceEvent::HeldEnter => true,
+                    DeviceEvent::Key(_) | DeviceEvent::Layout(_) => {
+                        message.at >= capture.grabbed_at
+                    }
+                    _ => false,
+                };
             if captured {
                 capture.switched |= matches!(message.event, DeviceEvent::Layout(Some(_)));
                 capture.queue.push(message);
