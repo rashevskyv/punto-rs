@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     ptr::null_mut,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, atomic::Ordering},
     thread,
     time::Duration,
 };
@@ -75,6 +75,7 @@ fn icon_of(tray: &Tray) -> Option<Icon> {
 }
 
 pub fn run_tray(tray: Tray) {
+    let stop = tray.stop_flag();
     let tray = Arc::new(Mutex::new(tray));
     let mut actions = HashMap::new();
     let built = {
@@ -116,13 +117,13 @@ pub fn run_tray(tray: Tray) {
                 dirty = true;
             }
         }
-        let (stopped, changed, version) = match tray.try_lock() {
-            Ok(mut tray) => (tray.stopped(), tray.poll(), tray.shared.version()),
-            Err(_) => (false, false, shown),
-        };
-        if stopped {
+        if stop.load(Ordering::Relaxed) {
             return;
         }
+        let (changed, version) = match tray.try_lock() {
+            Ok(mut tray) => (tray.poll(), tray.shared.version()),
+            Err(_) => (false, shown),
+        };
         if changed || dirty || version != shown {
             shown = version;
             if let Ok(tray) = tray.try_lock() {

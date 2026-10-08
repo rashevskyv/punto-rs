@@ -46,11 +46,25 @@ impl Tray {
     /// Окно записи комбинации; Esc - без изменений.
     #[cfg(windows)]
     pub(super) fn record_hotkey(&self) -> io::Result<()> {
-        let Some(combo) = super::dialogs::ask_hotkey()
-            .and_then(|(modifiers, vk)| crate::win::vk_combo(&modifiers, vk))
-        else {
+        let Some(combo) = super::dialogs::ask_hotkey() else {
             return Ok(());
         };
+        // Клавиша, печатающая символ, без Ctrl/Alt/Win перестала бы печатать.
+        let (key, modifiers) = combo.split_last().unwrap_or((&0, &[]));
+        let printable = keys::is_char(*key)
+            || keys::is_separator(*key)
+            || matches!(*key, keys::KEY_ENTER | keys::KEY_TAB | keys::KEY_BACKSPACE);
+        if printable
+            && !modifiers
+                .iter()
+                .any(|code| keys::is_command_modifier(*code))
+        {
+            super::dialogs::message(tr!(
+                "Эта клавиша печатает символ: добавьте Ctrl или Alt.",
+                "Ця клавіша друкує символ: додайте Ctrl або Alt."
+            ));
+            return Ok(());
+        }
         self.set_hotkey(combo).inspect_err(|err| {
             super::dialogs::message(&tr!(
                 format!("Комбинация не сохранена:\n{err}"),

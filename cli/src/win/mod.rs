@@ -33,8 +33,7 @@ use windows_sys::Win32::{
     },
 };
 
-pub use hook::{Grab, Grabs, set_word_hotkey};
-pub use keymap::vk_combo;
+pub use hook::{Grab, Grabs, recorded, set_word_hotkey, start_recording, stop_recording};
 pub use output::SendInputOutput;
 
 use crate::{
@@ -159,9 +158,9 @@ pub fn serve(cfg: &Config, verbose: bool, config: &Path, console: bool) {
     });
     watch::start(sender.clone(), stopped.clone());
     let tray = Tray::new(sender, shared.clone(), config, stopped.clone());
-    if cfg.tray {
-        thread::spawn(move || tray::run_tray(tray));
-    }
+    let tray = cfg
+        .tray
+        .then(|| thread::spawn(move || tray::run_tray(tray)));
     let version = env!("CARGO_PKG_VERSION");
     tr!(
         log!("punto-rs {version} запущен (Windows)"),
@@ -183,5 +182,11 @@ pub fn serve(cfg: &Config, verbose: bool, config: &Path, console: bool) {
             log!("punto-rs: введення зупинено після помилки: {err}")
         );
         std::process::exit(1);
+    }
+    // Значок убирает поток трея при остановке; без ожидания процесс
+    // завершится раньше, и значок останется до наведения мыши.
+    stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(tray) = tray {
+        let _ = tray.join();
     }
 }

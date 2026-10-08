@@ -190,8 +190,16 @@ impl Tray {
         changed
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     pub fn stopped(&self) -> bool {
         self.stopped.load(Ordering::Relaxed)
+    }
+
+    /// Флаг остановки демона: читается и без блокировки трея, пока
+    /// действие меню (диалог) держит её.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn stop_flag(&self) -> Arc<AtomicBool> {
+        self.stopped.clone()
     }
 
     /// Подсказка к значку.

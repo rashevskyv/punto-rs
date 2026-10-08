@@ -7,7 +7,7 @@ use std::{
     io,
     ptr::null_mut,
     sync::{
-        Arc, Mutex, OnceLock, PoisonError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
         mpsc::SyncSender,
     },
@@ -73,6 +73,16 @@ struct Hook {
     hotkeys: Mutex<Vec<Vec<u16>>>,
     /// Клавиши, нажатие которых проглочено: проглатывается и отпускание.
     swallowed: Mutex<HashSet<u16>>,
+    recording: Mutex<Recording>,
+}
+
+/// Запись комбинации из меню.
+#[derive(Default)]
+enum Recording {
+    #[default]
+    Off,
+    Waiting,
+    Done(Vec<u16>),
 }
 
 static HOOK: OnceLock<Hook> = OnceLock::new();
@@ -85,6 +95,55 @@ fn send(hook: &Hook, event: DeviceEvent) {
     });
 }
 
+fn recording(hook: &Hook) -> MutexGuard<'_, Recording> {
+    hook.recording
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Начинает запись комбинации: следующее нажатие не-модификатора вместе с
+/// зажатыми модификаторами вернёт `recorded`.
+pub fn start_recording() {
+    if let Some(hook) = HOOK.get() {
+        *recording(hook) = Recording::Waiting;
+    }
+}
+
+/// Записанная комбинация; запись при этом заканчивается.
+pub fn recorded() -> Option<Vec<u16>> {
+    let mut state = recording(HOOK.get()?);
+    if !matches!(*state, Recording::Done(_)) {
+        return None;
+    }
+    match std::mem::take(&mut *state) {
+        Recording::Done(combo) => Some(combo),
+        _ => None,
+    }
+}
+
+pub fn stop_recording() {
+    if let Some(hook) = HOOK.get() {
+        *recording(hook) = Recording::Off;
+    }
+}
+
+/// Записывает комбинацию, если запись ждёт нажатия: точные коды клавиш,
+/// правые модификаторы тоже. `true` - нажатие записано.
+fn record(hook: &Hook, held: &HashSet<u16>, key: u16) -> bool {
+    let mut state = recording(hook);
+    if !matches!(*state, Recording::Waiting)
+        || keys::is_shift(key)
+        || keys::is_command_modifier(key)
+    {
+        return false;
+    }
+    let mut combo: Vec<u16> = held.iter().copied().filter(|&code| code != key).collect();
+    combo.sort_unstable();
+    combo.push(key);
+    *state = Recording::Done(combo);
+    true
+}
+
 /// Обрабатывает клавишу; `true` - не передавать её программам.
 fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
     let mut held = hook.held.lock().unwrap_or_else(PoisonError::into_inner);
@@ -94,6 +153,15 @@ fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
         held.remove(&key);
         0
     };
+    // Записанная клавиша не доходит ни до программ, ни до демона.
+    if value == 1 && record(hook, &held, key) {
+        drop(held);
+        hook.swallowed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key);
+        return true;
+    }
     // Enter без модификаторов после слова в чужой раскладке: демон нажмёт
     // его сам после исправления.
     let held_enter = value == 1
@@ -205,6 +273,7 @@ pub fn start(tx: SyncSender<Message>, grabs: &Grabs, hotkeys: Vec<Vec<u16>>, tra
             held: Mutex::default(),
             hotkeys: Mutex::new(hotkeys),
             swallowed: Mutex::default(),
+            recording: Mutex::default(),
         });
         // SAFETY: процедуры хуков живут всё время процесса; модуль - текущий exe.
         unsafe {
