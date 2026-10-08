@@ -12,7 +12,12 @@ fn tray(name: &str) -> (Tray, Arc<Mutex<Vec<DeviceEvent>>>, std::path::PathBuf) 
         log.lock().unwrap().push(event);
         true
     });
-    let tray = Tray::new(send, Arc::default(), &dir, Arc::default());
+    let tray = Tray::new(
+        send,
+        Arc::default(),
+        &dir.join("config.conf"),
+        Arc::default(),
+    );
     (tray, events, dir)
 }
 
@@ -127,5 +132,27 @@ fn test_tray_timed_pause_resumes_unless_toggled_and_tooltips() {
     assert_eq!(tray.tooltip(), "punto-rs: не слежу в «Code»");
     tray.shared.update(|status| status.excluded = false);
     assert_eq!(tray.tooltip(), "punto-rs: исправляю раскладку");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_tray_hotkey_choice_written_to_config_and_applied() {
+    let (mut tray, events, dir) = tray("hotkey");
+    tray.shared
+        .update(|status| status.hotkey = vec![crate::keys::KEY_INSERT]);
+    let menu = labels(&tray.menu());
+    assert!(
+        menu.contains(&"Клавиша исправления: Insert".to_string()),
+        "{menu:?}"
+    );
+    tray.activate(Action::SetHotkey("pause"));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.conf")).unwrap(),
+        "hotkey=pause\n"
+    );
+    let applied = events.lock().unwrap().iter().any(
+        |event| matches!(event, DeviceEvent::Control(Control::Hotkey(combo)) if combo == &[119]),
+    );
+    assert!(applied);
     let _ = std::fs::remove_dir_all(dir);
 }

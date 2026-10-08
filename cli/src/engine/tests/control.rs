@@ -65,3 +65,30 @@ fn test_control_applies_in_old_generation_too() {
     assert_eq!(h.engine.app(), Some("code"));
     assert_eq!(h.engine.shown_lang(), Some(layout::Lang::En));
 }
+
+#[test]
+fn test_control_hotkey_from_tray_replaces_word_hotkey() {
+    let mut h = Harness::new();
+    h.event(DeviceEvent::Control(Control::Hotkey(vec![119])));
+    assert_eq!(h.engine.hotkey, [119]);
+    h.tap(16);
+    assert!(h.fix().is_none());
+    h.tap(16);
+    h.tap(119);
+    assert_eq!(h.ready().unwrap().strokes.len(), 1);
+}
+
+#[test]
+fn test_hotkey_with_empty_buffer_converts_selection_on_windows_only() {
+    let mut h = Harness::new();
+    h.tap(keys::KEY_INSERT);
+    let fix = h.ready();
+    assert_eq!(
+        fix.as_ref().map(|fix| fix.selection),
+        cfg!(windows).then_some(true)
+    );
+    assert!(fix.is_none_or(|fix| fix.strokes.is_empty() && !fix.phrase));
+    // Набранное слово исправляется как раньше, не выделение.
+    h.tap(16);
+    assert!(!h.fix().unwrap().selection);
+}

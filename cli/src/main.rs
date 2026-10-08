@@ -191,11 +191,10 @@ fn main() {
         );
         return;
     }
-    let config_dir = config_path.parent().map(PathBuf::from).unwrap_or_default();
     #[cfg(target_os = "linux")]
-    linux::serve(&cfg, verbose, &config_dir);
+    linux::serve(&cfg, verbose, &config_path);
     #[cfg(windows)]
-    win::serve(&cfg, verbose, &config_dir, console);
+    win::serve(&cfg, verbose, &config_path, console);
 }
 
 fn print_help() {

@@ -19,6 +19,10 @@ use crate::{
     tray::Shared,
 };
 
+#[path = "daemon/correct.rs"]
+mod correct;
+use correct::{Job, correct};
+
 const CONTROL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Событие устройства с поколением сессии, в котором оно прочитано.
@@ -129,6 +133,7 @@ fn report(engine: &Engine, shared: &Shared, is_shell: fn(&str) -> bool) {
         status.excluded = engine.excluded();
         status.layout = engine.shown_lang();
         status.last_auto.clone_from(&engine.last_auto);
+        status.hotkey.clone_from(&engine.hotkey);
         if let Some(app) = engine.app().filter(|app| !is_shell(app)) {
             status.app = Some(app.to_string());
         }
@@ -213,67 +218,38 @@ pub fn run<T: KeyOutput>(
         };
         report(&engine, shared, crate::platform::is_shell);
         // Придержанный Enter нажимается после исправления, даже пустого или прерванного.
-        let fix = match held_enter {
-            Some(strokes) => Some(("Enter", strokes, true)),
-            None => engine
-                .take_ready(cfg, Instant::now())
-                .map(|fix| (fix.kind(), fix.strokes, false)),
+        let job = match held_enter {
+            Some(strokes) => Some(Job {
+                kind: "Enter",
+                strokes,
+                enter: true,
+                selection: false,
+            }),
+            None => engine.take_ready(cfg, Instant::now()).map(|fix| Job {
+                kind: fix.kind(),
+                enter: false,
+                selection: fix.selection,
+                strokes: fix.strokes,
+            }),
         };
-        if let Some((kind, strokes, enter)) = fix {
-            if verbose && !strokes.is_empty() {
-                let count = strokes.len();
+        if let Some(job) = job {
+            if verbose {
+                let (count, kind) = (job.strokes.len(), job.kind);
                 tr!(
                     log!("punto-rs: исправляю {count} нажатий ({kind})"),
                     log!("punto-rs: виправляю {count} натискань ({kind})")
                 );
             }
-            let grabbed_at = SystemTime::now();
-            let grab = match grabs.grab() {
-                Ok(grab) => grab,
-                Err(err) => {
-                    tr!(
-                        log!("punto-rs: клавиатуры не захвачены, исправление пропущено: {err}"),
-                        log!("punto-rs: клавіатури не захоплено, виправлення пропущено: {err}")
-                    );
-                    engine.invalidate();
-                    if enter {
-                        injector.press(keys::KEY_ENTER)?;
-                    }
-                    continue;
-                }
-            };
-            let mut capture = Capture {
+            let capture = Capture {
                 rx,
                 guard,
                 stopped,
                 generation,
-                grabbed_at,
+                grabbed_at: SystemTime::now(),
                 queue: Vec::new(),
                 switched: false,
             };
-            let result = injector.fix(&strokes, cfg, |pause| {
-                wait_for_input(&mut capture, &mut engine, cfg, pause)
-            });
-            match result {
-                Ok(()) if strokes.is_empty() => {}
-                Ok(()) => engine.switched(),
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => {
-                    engine.invalidate();
-                    log!(
-                        "punto-rs: {}",
-                        tr!(
-                            "коррекция прервана; буфер сброшен, текст мог быть изменён частично",
-                            "виправлення перервано; буфер скинуто, текст міг змінитися частково"
-                        )
-                    );
-                }
-                Err(err) => return Err(err),
-            }
-            if enter {
-                injector.press(keys::KEY_ENTER)?;
-            }
-            capture.replay(grab, &mut injector, &mut engine, cfg)?;
-            grabs.hold_enter(cfg!(windows) && engine.wants_enter(cfg));
+            correct(&job, capture, grabs, &mut injector, &mut engine, cfg)?;
         }
     }
 }

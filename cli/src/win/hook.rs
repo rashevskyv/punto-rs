@@ -69,8 +69,8 @@ struct Hook {
     hold_enter: Arc<AtomicBool>,
     held: Mutex<HashSet<u16>>,
     /// Горячие клавиши punto-rs: программам их нажатие не нужно (Insert
-    /// иначе включает режим замены).
-    hotkeys: Vec<Vec<u16>>,
+    /// иначе включает режим замены). Первая - исправление слова.
+    hotkeys: Mutex<Vec<Vec<u16>>>,
     /// Клавиши, нажатие которых проглочено: проглатывается и отпускание.
     swallowed: Mutex<HashSet<u16>>,
 }
@@ -102,11 +102,16 @@ fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
         && hook.hold_enter.load(Ordering::SeqCst)
         && !hook.capture.load(Ordering::SeqCst);
     let hotkey = down
-        && hook.hotkeys.iter().any(|combo| {
-            combo.last() == Some(&key)
-                && combo.len() == held.len()
-                && combo.iter().all(|code| held.contains(code))
-        });
+        && hook
+            .hotkeys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|combo| {
+                combo.last() == Some(&key)
+                    && combo.len() == held.len()
+                    && combo.iter().all(|code| held.contains(code))
+            });
     drop(held);
     send(
         hook,
@@ -175,6 +180,19 @@ unsafe extern "system" fn mouse(code: i32, wparam: WPARAM, lparam: LPARAM) -> LR
     unsafe { CallNextHookEx(null_mut(), code, wparam, lparam) }
 }
 
+/// Новая комбинация исправления слова: её нажатие тоже не доходит до программ.
+pub fn set_word_hotkey(combo: Vec<u16>) {
+    if let Some(hook) = HOOK.get()
+        && let Some(first) = hook
+            .hotkeys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .first_mut()
+    {
+        *first = combo;
+    }
+}
+
 /// Ставит хуки в своём потоке с очередью сообщений: без неё они не работают.
 pub fn start(tx: SyncSender<Message>, grabs: &Grabs, hotkeys: Vec<Vec<u16>>, track_mouse: bool) {
     let capture = grabs.capture.clone();
@@ -185,7 +203,7 @@ pub fn start(tx: SyncSender<Message>, grabs: &Grabs, hotkeys: Vec<Vec<u16>>, tra
             capture,
             hold_enter,
             held: Mutex::default(),
-            hotkeys,
+            hotkeys: Mutex::new(hotkeys),
             swallowed: Mutex::default(),
         });
         // SAFETY: процедуры хуков живут всё время процесса; модуль - текущий exe.

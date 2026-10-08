@@ -4,12 +4,13 @@
 //! Отрисовку берут `tray/sni.rs` (`StatusNotifierItem`, Linux) и `win/tray.rs`.
 
 mod dialogs;
+mod hotkey;
 pub mod icon;
 #[cfg(target_os = "linux")]
 pub mod sni;
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -37,6 +38,8 @@ pub struct Status {
     pub app: Option<String>,
     /// Последнее автоисправленное слово, как оно было на экране.
     pub last_auto: Option<String>,
+    /// Комбинация исправления слова.
+    pub hotkey: Vec<u16>,
 }
 
 /// Общее состояние с номером версии: трей перерисовывается при его смене.
@@ -83,6 +86,8 @@ pub enum Action {
     IncludeApp(String),
     OpenWords,
     OpenApps,
+    SetHotkey(&'static str),
+    OpenConfig,
     #[cfg(windows)]
     ToggleAutostart,
     Quit,
@@ -134,23 +139,22 @@ pub struct Tray {
     pub shared: Arc<Shared>,
     words: List,
     apps: List,
+    /// Файл конфига: меню записывает в него выбранную клавишу.
+    config: PathBuf,
     stopped: Arc<AtomicBool>,
     /// Номер паузы: таймер снимает только свою паузу.
     pause_epoch: Arc<AtomicU64>,
 }
 
 impl Tray {
-    pub fn new(
-        send: Sender,
-        shared: Arc<Shared>,
-        config_dir: &Path,
-        stopped: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn new(send: Sender, shared: Arc<Shared>, config: &Path, stopped: Arc<AtomicBool>) -> Self {
+        let config_dir = config.parent().unwrap_or(config);
         let tray = Self {
             send,
             shared,
             words: List::open(config_dir, EXCEPTIONS_FILE),
             apps: List::open(config_dir, APPS_FILE),
+            config: config.to_path_buf(),
             stopped,
             pause_epoch: Arc::default(),
         };
@@ -279,6 +283,7 @@ impl Tray {
             Action::OpenApps,
         ));
         menu.push(Item::separator());
+        menu.push(hotkey::menu(&status.hotkey));
         #[cfg(windows)]
         menu.push(Item::check(
             tr!("Запускать вместе с Windows", "Запускати разом з Windows").into(),
@@ -331,6 +336,8 @@ impl Tray {
             Action::IncludeApp(app) => self.apps.remove(&app),
             Action::OpenWords => open_file(&self.words.path, &words_header()),
             Action::OpenApps => open_file(&self.apps.path, &apps_header()),
+            Action::SetHotkey(name) => self.set_hotkey(name),
+            Action::OpenConfig => open_file(&self.config, ""),
             #[cfg(windows)]
             Action::ToggleAutostart => {
                 crate::win::autostart::set(!crate::win::autostart::enabled())
@@ -347,6 +354,16 @@ impl Tray {
             );
         }
         self.push_lists();
+    }
+
+    /// Записывает клавишу исправления в конфиг и сразу применяет её.
+    fn set_hotkey(&self, name: &str) -> std::io::Result<()> {
+        crate::config::set_value(&self.config, "hotkey", name)?;
+        let combo = crate::keys::parse_combo(name).unwrap_or_default();
+        #[cfg(windows)]
+        crate::win::set_word_hotkey(combo.clone());
+        (self.send)(DeviceEvent::Control(Control::Hotkey(combo)));
+        Ok(())
     }
 
     /// Пауза на `duration`; ручное снятие или новая пауза отменяют таймер.

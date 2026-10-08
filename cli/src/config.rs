@@ -164,6 +164,40 @@ impl Config {
     }
 }
 
+/// Записывает `key=value` в конфиг: заменяет строку с этим ключом или
+/// дописывает её; остальные строки и комментарии остаются. Нет файла - создаёт.
+pub fn set_value(path: &Path, key: &str, value: &str) -> std::io::Result<()> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err),
+    };
+    let line = format!("{key}={value}");
+    let mut found = false;
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|raw| {
+            let code = raw.split('#').next().unwrap_or("");
+            if code
+                .split_once('=')
+                .is_some_and(|(name, _)| name.trim() == key)
+            {
+                found = true;
+                line.clone()
+            } else {
+                raw.to_string()
+            }
+        })
+        .collect();
+    if !found {
+        lines.push(line);
+    }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(path, lines.join("\n") + "\n")
+}
+
 /// Комбинации не совпадают друг с другом, а перед последней клавишей - модификаторы.
 fn check_combos(cfg: &Config, errors: &mut Vec<String>) {
     let combos = [
@@ -285,6 +319,23 @@ mod tests {
     #[test]
     fn accepts_bounds_and_modifier_only_switch() {
         Config::parse("key-delay=1\npost-backspace-delay=0\nswitch-delay=2000\nmax-strokes=4096\nbuffer-timeout=300000\nlayout-switch=ctrl+shift").unwrap();
+    }
+
+    #[test]
+    fn set_value_replaces_key_keeps_comments_or_appends() {
+        let dir = std::env::temp_dir().join(format!("punto-rs-set-{}", std::process::id()));
+        let path = dir.join("config.conf");
+        set_value(&path, "hotkey", "pause").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hotkey=pause\n");
+        fs::write(&path, "# клавіша\nhotkey = insert # стара\ntray=yes\n").unwrap();
+        set_value(&path, "hotkey", "scrolllock").unwrap();
+        set_value(&path, "language", "uk").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# клавіша\nhotkey=scrolllock\ntray=yes\nlanguage=uk\n"
+        );
+        Config::load(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

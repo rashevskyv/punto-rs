@@ -48,6 +48,34 @@ pub fn key_char(lang: Lang, code: u16, shift: bool) -> Option<char> {
     row.chars().nth(usize::from(position))
 }
 
+/// Текст, набранный в одной раскладке пары, - в другой, клавиша в клавишу.
+/// Исходная раскладка - та, чьих букв в тексте больше. Возвращает текст и
+/// раскладку результата; `None` - букв ни одной из раскладок нет.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn convert_text(text: &str, first: Lang, second: Lang) -> Option<(String, Lang)> {
+    let letters = |lang: Lang| {
+        text.chars()
+            .filter(|c| c.is_alphabetic() && c.to_lowercase().all(|l| lang.alphabet().contains(&l)))
+            .count()
+    };
+    let (from, to) = match (letters(first), letters(second)) {
+        (0, 0) => return None,
+        (a, b) if a >= b => (first, second),
+        _ => (second, first),
+    };
+    let converted = text
+        .chars()
+        .map(|c| {
+            (2..=53u16)
+                .flat_map(|code| [(code, false), (code, true)])
+                .find(|&(code, shift)| key_char(from, code, shift) == Some(c))
+                .and_then(|(code, shift)| key_char(to, code, shift))
+                .unwrap_or(c)
+        })
+        .collect();
+    Some((converted, to))
+}
+
 /// Частые слова из 1-2 букв: статистики у них нет, решает закрытый список.
 const EN_SHORT: [&str; 29] = [
     "a", "i", "am", "an", "as", "at", "be", "by", "do", "go", "he", "hi", "if", "in", "is", "it",

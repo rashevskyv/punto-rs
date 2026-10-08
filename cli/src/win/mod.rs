@@ -3,9 +3,11 @@
 #![allow(unsafe_code)]
 
 pub mod autostart;
+mod clipboard;
 mod hook;
 mod keymap;
 mod output;
+pub mod selection;
 mod tray;
 mod watch;
 
@@ -31,7 +33,7 @@ use windows_sys::Win32::{
     },
 };
 
-pub use hook::{Grab, Grabs};
+pub use hook::{Grab, Grabs, set_word_hotkey};
 pub use output::SendInputOutput;
 
 use crate::{
@@ -125,9 +127,9 @@ fn single_instance() -> bool {
     }
 }
 
-pub fn serve(cfg: &Config, verbose: bool, config_dir: &Path, console: bool) {
+pub fn serve(cfg: &Config, verbose: bool, config: &Path, console: bool) {
     if !console {
-        log_to_file(config_dir);
+        log_to_file(config.parent().unwrap_or(config));
     }
     if !single_instance() {
         die(tr!("punto-rs уже запущен", "punto-rs уже запущено"));
@@ -155,7 +157,7 @@ pub fn serve(cfg: &Config, verbose: bool, config_dir: &Path, console: bool) {
         .is_ok()
     });
     watch::start(sender.clone(), stopped.clone());
-    let tray = Tray::new(sender, shared.clone(), config_dir, stopped.clone());
+    let tray = Tray::new(sender, shared.clone(), config, stopped.clone());
     if cfg.tray {
         thread::spawn(move || tray::run_tray(tray));
     }

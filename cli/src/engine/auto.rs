@@ -70,6 +70,7 @@ impl Engine {
                 strokes: self.buffer.phrase()[start..].to_vec(),
                 phrase: false,
                 auto: true,
+                selection: false,
                 trigger: keys::KEY_SPACE,
                 ready_at: None,
             });

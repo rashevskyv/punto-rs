@@ -50,6 +50,8 @@ pub enum Control {
     Pause(bool),
     Exceptions(Arc<HashSet<String>>),
     ExcludedApps(Arc<HashSet<String>>),
+    /// Новая комбинация исправления слова (выбрана в меню).
+    Hotkey(Vec<u16>),
 }
 
 #[path = "engine/auto.rs"]
@@ -63,6 +65,8 @@ pub struct PendingFix {
     pub phrase: bool,
     /// Найдено детектором на пробеле, а не по хоткею.
     pub auto: bool,
+    /// Буфер пуст: конвертировать выделенный текст (Windows).
+    pub selection: bool,
     trigger: u16,
     ready_at: Option<Instant>,
 }
@@ -71,6 +75,7 @@ impl PendingFix {
     /// Вид исправления для журнала.
     pub fn kind(&self) -> &'static str {
         match (self.auto, self.phrase) {
+            _ if self.selection => tr!("выделение", "виділення"),
             (true, _) => tr!("авто", "авто"),
             (false, true) => tr!("фраза", "фраза"),
             (false, false) => tr!("слово", "слово"),
@@ -80,6 +85,8 @@ impl PendingFix {
 
 pub struct Engine {
     buffer: Buffer,
+    /// Комбинация исправления слова: из конфига, затем из меню.
+    pub hotkey: Vec<u16>,
     held: HeldKeys,
     pending: Option<PendingFix>,
     pub paused: bool,
@@ -98,6 +105,7 @@ impl Engine {
     pub fn new(cfg: &Config, now: Instant) -> Self {
         Self {
             buffer: Buffer::new(cfg.max_strokes),
+            hotkey: cfg.hotkey.clone(),
             held: HeldKeys::default(),
             pending: None,
             paused: false,
@@ -110,6 +118,12 @@ impl Engine {
             app: None,
             last_auto: None,
         }
+    }
+
+    /// Пара раскладок с активной, если известна.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn pair(&self) -> Option<Pair> {
+        self.layout
     }
 
     /// Раскладка на экране, если пара известна.
@@ -135,6 +149,7 @@ impl Engine {
             DeviceEvent::Control(Control::Pause(paused)) => self.paused = *paused,
             DeviceEvent::Control(Control::Exceptions(words)) => self.exceptions = words.clone(),
             DeviceEvent::Control(Control::ExcludedApps(apps)) => self.excluded_apps = apps.clone(),
+            DeviceEvent::Control(Control::Hotkey(combo)) => self.hotkey.clone_from(combo),
             _ => return false,
         }
         self.invalidate();
@@ -256,7 +271,7 @@ impl Engine {
             && self.held.matches(&cfg.phrase_hotkey)
         {
             Some(true)
-        } else if cfg.hotkey.last() == Some(&event.code) && self.held.matches(&cfg.hotkey) {
+        } else if self.hotkey.last() == Some(&event.code) && self.held.matches(&self.hotkey) {
             Some(false)
         } else {
             None
@@ -267,11 +282,15 @@ impl Engine {
             } else {
                 self.buffer.last_word()
             };
-            if !strokes.is_empty() {
+            // Пустой буфер (клик или стрелки перед выделением): в Windows
+            // хоткей конвертирует выделенный текст.
+            let selection = strokes.is_empty() && !phrase && cfg!(windows);
+            if !strokes.is_empty() || selection {
                 self.pending = Some(PendingFix {
                     strokes: strokes.to_vec(),
                     phrase,
                     auto: false,
+                    selection,
                     trigger: event.code,
                     ready_at: None,
                 });

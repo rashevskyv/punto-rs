@@ -25,7 +25,7 @@ pub const VIRTUAL_NAME: &str = "punto-rs virtual keyboard";
 
 /// Запуск демона: блокировка экземпляра, потоки сессии, раскладки и устройств,
 /// главный цикл до сигнала завершения.
-pub fn serve(cfg: &Config, verbose: bool, config_dir: &Path) {
+pub fn serve(cfg: &Config, verbose: bool, config: &Path) {
     let runtime = xdg_dir("XDG_RUNTIME_DIR").unwrap_or_else(|| {
         die(tr!(
             "XDG_RUNTIME_DIR не задан: запускайте в пользовательской сессии",
@@ -90,7 +90,7 @@ pub fn serve(cfg: &Config, verbose: bool, config_dir: &Path) {
         })
     };
     kwin::watch(&runtime, session_bus, sender.clone(), stopped.clone());
-    let tray = Tray::new(sender, shared.clone(), config_dir, stopped.clone());
+    let tray = Tray::new(sender, shared.clone(), config, stopped.clone());
     if cfg.tray {
         thread::spawn(move || tray::sni::run_tray(tray));
     }

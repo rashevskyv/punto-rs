@@ -15,13 +15,13 @@
 - `cli/src/linux.rs` — запуск в Linux: блокировка экземпляра, потоки, сигналы.
 - `cli/src/i18n.rs` — язык сообщений (ключ language), макрос tr! в `cli/src/main.rs`.
 - `cli/src/lists.rs` — пользовательские списки слов-исключений и программ.
-- `cli/src/tray.rs` — ядро значка в трее: состояние, меню, действия; `cli/src/tray/sni.rs` - StatusNotifierItem (ksni), `cli/src/tray/icon.rs` - картинка, `cli/src/tray/dialogs.rs` - диалоги.
+- `cli/src/tray.rs` — ядро значка в трее: состояние, меню, действия; `cli/src/tray/sni.rs` - StatusNotifierItem (ksni), `cli/src/tray/icon.rs` - картинка, `cli/src/tray/dialogs.rs` - диалоги, `cli/src/tray/hotkey.rs` - выбор клавиши исправления.
 - `cli/src/kwin.rs` — скрипт KWin, сообщающий класс активного окна.
-- `cli/src/win/mod.rs` — Windows: хук (`cli/src/win/hook.rs`), SendInput (`cli/src/win/output.rs`), раскладка и окно переднего плана (`cli/src/win/watch.rs`), трей (`cli/src/win/tray.rs`), автозапуск (`cli/src/win/autostart.rs`), скан-коды (`cli/src/win/keymap.rs`).
+- `cli/src/win/mod.rs` — Windows: хук (`cli/src/win/hook.rs`), SendInput (`cli/src/win/output.rs`), раскладка и окно переднего плана (`cli/src/win/watch.rs`), трей (`cli/src/win/tray.rs`), автозапуск (`cli/src/win/autostart.rs`), скан-коды (`cli/src/win/keymap.rs`), конвертация выделения (`cli/src/win/selection.rs`, буфер обмена - `cli/src/win/clipboard.rs`).
 - `cli/src/config.rs` — формат, значения по умолчанию и валидация конфигурации.
-- `cli/src/daemon.rs` — цикл событий, захват, отмена, очередь и переигрывание ввода.
+- `cli/src/daemon.rs` — цикл событий, захват, отмена, очередь и переигрывание ввода; `cli/src/daemon/correct.rs` - выполнение коррекции.
 - `cli/src/devices.rs` — поиск устройств, evdev, EVIOCGRAB, ресинхронизация и фильтрация seat0.
-- `cli/src/engine.rs` — буфер, состояние клавиш, ручные хоткеи и решение об автоисправлении.
+- `cli/src/engine.rs` — буфер, состояние клавиш, ручные хоткеи; `cli/src/engine/auto.rs` - решение об автоисправлении на пробеле и перед Enter.
 - `cli/src/injector.rs` — виртуальная клавиатура uinput, стирание, смена раскладки и гарантированное освобождение клавиш.
 - `cli/src/instance.rs` — безопасная файловая блокировка одного экземпляра.
 - `cli/src/kde.rs` — состояние раскладки KDE через session D-Bus org.kde.keyboard.

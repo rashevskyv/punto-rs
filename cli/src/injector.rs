@@ -93,6 +93,18 @@ impl<T: KeyOutput> Injector<T> {
         }
     }
 
+    /// Нажимает клавиши комбинации по порядку и отпускает в обратном.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn chord(&mut self, combo: &[u16]) -> io::Result<()> {
+        for &code in combo {
+            self.emit(code, 1)?;
+        }
+        for &code in combo.iter().rev() {
+            self.emit(code, 0)?;
+        }
+        Ok(())
+    }
+
     /// Нажимает и отпускает клавишу.
     pub fn press(&mut self, code: u16) -> io::Result<()> {
         self.emit(code, 1)?;

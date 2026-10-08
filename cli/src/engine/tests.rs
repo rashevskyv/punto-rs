@@ -36,9 +36,11 @@ impl Harness {
         self.now += Duration::from_millis(31);
         self.engine.take_ready(&self.cfg, self.now)
     }
+    /// Исправление набранного по хоткею; конвертация выделения (пустой
+    /// буфер в Windows) проверяется отдельно.
     fn fix(&mut self) -> Option<PendingFix> {
         self.tap(keys::KEY_INSERT);
-        self.ready()
+        self.ready().filter(|fix| !fix.selection)
     }
 }
 

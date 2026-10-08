@@ -60,7 +60,7 @@ impl Pair {
 }
 
 #[path = "layout/keymap.rs"]
-mod keymap;
+pub mod keymap;
 pub use keymap::key_char;
 use keymap::{EN_ALPHABET, RU_ALPHABET, UK_ALPHABET, short_words};
 

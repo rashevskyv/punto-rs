@@ -205,3 +205,20 @@ fn test_wrong_layout_ukrainian_pair_both_directions() {
     assert!(!short_wrong(&keys_for(Lang::En, "wt"), EN_RU));
     assert!(!short_wrong(&keys_for(Lang::En, "is"), EN_UK));
 }
+
+#[test]
+fn test_convert_text_follows_majority_layout_key_by_key() {
+    assert_eq!(
+        keymap::convert_text("Ghbdsn? cdsn!", Lang::En, Lang::Uk),
+        Some(("Привіт, світ!".to_string(), Lang::Uk))
+    );
+    assert_eq!(
+        keymap::convert_text("руддщ Цщкдвю", Lang::En, Lang::Ru),
+        Some(("hello World.".to_string(), Lang::En))
+    );
+    assert_eq!(
+        keymap::convert_text("v`zcj", Lang::Uk, Lang::En),
+        Some(("м'ясо".to_string(), Lang::Uk))
+    );
+    assert_eq!(keymap::convert_text("123 - 45", Lang::En, Lang::Uk), None);
+}

@@ -148,7 +148,12 @@ mod tests {
     fn sni() -> Sni {
         let dir = std::env::temp_dir().join(format!("punto-rs-sni-{}", std::process::id()));
         let send: super::super::Sender = Arc::new(|_| true);
-        let tray = Tray::new(send, Arc::default(), &dir, Arc::new(AtomicBool::new(false)));
+        let tray = Tray::new(
+            send,
+            Arc::default(),
+            &dir.join("config.conf"),
+            Arc::new(AtomicBool::new(false)),
+        );
         tray.shared
             .update(|status| status.app = Some("my_app".into()));
         Sni(Arc::new(Mutex::new(tray)))
