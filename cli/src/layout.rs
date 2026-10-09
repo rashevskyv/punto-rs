@@ -250,6 +250,26 @@ pub fn wrong_layout(keys: &[(u16, bool)], pair: Pair) -> bool {
         || (keys.len() == 2
             && short_wrong(keys, pair)
             && (ukrainian || !shown_known(keys, pair.shown)))
+        || wrong_compound(keys, pair)
+}
+
+/// Слово через дефис (`,elm-kfcrf` -> `будь-ласка`), дефис на одной клавише в
+/// обеих раскладках. Исправляется, если исправляется хоть одна часть, а
+/// остальные в другой раскладке - тоже слова словаря или частые короткие.
+fn wrong_compound(keys: &[(u16, bool)], pair: Pair) -> bool {
+    let hyphen = |&(code, shift): &(u16, bool)| {
+        key_char(pair.shown, code, shift) == Some('-')
+            && key_char(pair.other, code, shift) == Some('-')
+    };
+    if !keys.iter().any(hyphen) {
+        return false;
+    }
+    let parts: Vec<&[(u16, bool)]> = keys.split(hyphen).collect();
+    parts.iter().all(|part| {
+        !part.is_empty()
+            && (short_wrong(part, pair)
+                || scores(part, pair).is_some_and(|scores| scores.alt_known && !scores.shown_known))
+    }) && parts.iter().any(|part| wrong_layout(part, pair))
 }
 
 /// Запись нажатий в раскладке `lang` в нижнем регистре, `ё` -> `е`.

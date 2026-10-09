@@ -223,3 +223,23 @@ fn test_convert_text_follows_majority_layout_key_by_key() {
     );
     assert_eq!(keymap::convert_text("123 - 45", Lang::En, Lang::Uk), None);
 }
+
+#[test]
+fn test_wrong_layout_hyphenated_word_fixed_by_parts() {
+    for typed in [",elm-kfcrf", "nfr-nfrb", "zrjcm-nfrb"] {
+        assert!(wrong_layout(&keys_for(Lang::En, typed), EN_UK), "{typed}");
+    }
+    for kept in [
+        "e-mail",
+        "t-shirt",
+        "self-made",
+        "well-known",
+        "x-ray",
+        "-elm",
+    ] {
+        assert!(!wrong_layout(&keys_for(Lang::En, kept), EN_UK), "{kept}");
+    }
+    for kept in ["будь-ласка", "так-таки"] {
+        assert!(!wrong_layout(&keys_for(Lang::Uk, kept), UK_EN), "{kept}");
+    }
+}
