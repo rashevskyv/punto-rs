@@ -4,7 +4,7 @@ use super::*;
 const CASES: &str = include_str!("../../tests/data/layout_cases.tsv");
 /// Полнота на `test` при текущих порогах - 190 из 200; запас на пересборку словарей.
 const MIN_CAUGHT: usize = 185;
-/// Полнота `uk_wrong` на `test` - 110 из 115; запас на пересборку словаря.
+/// Полнота `uk_wrong` на `test` - 115 из 115; запас на пересборку словаря.
 const MIN_CAUGHT_UK: usize = 105;
 
 const EN_RU: Pair = Pair::new(Lang::En, Lang::Ru);
@@ -186,7 +186,8 @@ fn test_known_ukrainian_dictionary_has_verbs_and_apostrophes() {
 
 #[test]
 fn test_wrong_layout_ukrainian_pair_both_directions() {
-    for typed in ["ghbdsn", "lzre.", "v`zcj", "Ldsxs", "\\fyjr"] {
+    // ls] = «дії», nb[ = «тих»: край слова - буква только в UK, «ls» не оправдание.
+    for typed in ["ghbdsn", "lzre.", "v`zcj", "Ldsxs", "\\fyjr", "ls]", "nb["] {
         assert!(wrong_layout(&keys_for(Lang::En, typed), EN_UK), "{typed}");
     }
     for typed in ["руддщ", "цщкдв", "зкщпкфь", "ершт"] {

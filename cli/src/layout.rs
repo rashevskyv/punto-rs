@@ -84,7 +84,10 @@ pub const MIN_LETTERS: usize = 3;
 /// Перевес правдоподобия другой раскладки, бит на символ.
 pub const MIN_MARGIN: f64 = 1.0;
 /// Слово в другой раскладке должно само быть похоже на слово своего языка.
-pub const MAX_ALT_COST: f64 = 6.0;
+pub const MAX_ALT_COST: f64 = 7.0;
+/// Для пары с украинским порогов нет, кроме защиты от ложных «есть в словаре»
+/// фильтра Блума: бессмыслица в украинской раскладке дороже этого.
+pub const UK_MAX_ALT_COST: f64 = 8.0;
 /// Цена неразборчивой записи на экране: буква внутри не из алфавита.
 const UNREADABLE_COST: f64 = 25.5;
 
@@ -209,12 +212,15 @@ pub fn scores(keys: &[(u16, bool)], pair: Pair) -> Option<Scores> {
         return None;
     }
     let shown_core = core(shown, &on_screen);
+    // Край слова - буква только в другой раскладке (`ls]` -> `дії`): на
+    // экране не слово `ls`, а `ls]`, и словарь экрана его не оправдывает.
     Some(Scores {
         shown_cost: shown_core
             .as_ref()
             .map_or(UNREADABLE_COST, |letters| cost(shown, letters)),
         alt_cost: cost(other, &alt_core),
-        shown_known: shown_core.is_some_and(|letters| known(shown, &letters)),
+        shown_known: shown_core
+            .is_some_and(|letters| letters.len() == alt_core.len() && known(shown, &letters)),
         alt_known: known(other, &alt_core),
     })
 }
@@ -229,9 +235,21 @@ pub fn wrong_layout(keys: &[(u16, bool)], pair: Pair) -> bool {
     if is_exception(keys, pair.shown) {
         return false;
     }
-    scores(keys, pair).is_some_and(|scores| scores.should_switch(MIN_MARGIN, MAX_ALT_COST))
+    // Украинский - язык пользователя по умолчанию: слово из словаря UK, которого
+    // нет в словаре EN, исправляется без порогов цены (`nen` -> `тут`), а
+    // короткое - по списку, без словаря EN: он полон сокращений (`wt`, `nb`).
+    let ukrainian = pair.other == Lang::Uk;
+    scores(keys, pair).is_some_and(|scores| {
+        if ukrainian {
+            scores.alt_known && !scores.shown_known && scores.alt_cost <= UK_MAX_ALT_COST
+        } else {
+            scores.should_switch(MIN_MARGIN, MAX_ALT_COST)
+        }
+    })
         // Одна буква сама не исправляется: `f`/`а`, `d`/`в` одинаково возможны.
-        || (keys.len() == 2 && short_wrong(keys, pair) && !shown_known(keys, pair.shown))
+        || (keys.len() == 2
+            && short_wrong(keys, pair)
+            && (ukrainian || !shown_known(keys, pair.shown)))
 }
 
 /// Запись нажатий в раскладке `lang` в нижнем регистре, `ё` -> `е`.
