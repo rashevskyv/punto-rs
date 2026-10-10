@@ -145,6 +145,15 @@ fn record(hook: &Hook, held: &HashSet<u16>, key: u16) -> bool {
     true
 }
 
+/// Enter (и на цифровом блоке) без модификаторов. Последняя буква слова
+/// при быстром наборе ещё зажата, когда нажат Enter: она не мешает.
+fn enter_alone(held: &HashSet<u16>, key: u16) -> bool {
+    keys::is_phrase_end(key)
+        && !held
+            .iter()
+            .any(|&code| keys::is_shift(code) || keys::is_command_modifier(code))
+}
+
 /// Обрабатывает клавишу; `true` - не передавать её программам.
 fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
     let mut held = hook.held.lock().unwrap_or_else(PoisonError::into_inner);
@@ -166,8 +175,7 @@ fn on_key(hook: &Hook, key: u16, down: bool) -> bool {
     // Enter без модификаторов после слова в чужой раскладке: демон нажмёт
     // его сам после исправления.
     let held_enter = value == 1
-        && key == keys::KEY_ENTER
-        && held.len() == 1
+        && enter_alone(&held, key)
         && hook.hold_enter.load(Ordering::SeqCst)
         && !hook.capture.load(Ordering::SeqCst);
     let hotkey = down
@@ -298,4 +306,27 @@ pub fn start(tx: SyncSender<Message>, grabs: &Grabs, hotkeys: Vec<Vec<u16>>, tra
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enter_alone_allows_held_letter_not_modifiers() {
+        let held = |codes: &[u16]| codes.iter().copied().collect::<HashSet<u16>>();
+        assert!(enter_alone(&held(&[keys::KEY_ENTER]), keys::KEY_ENTER));
+        // Буква `t` ещё зажата: быстрый набор слова и Enter.
+        assert!(enter_alone(&held(&[20, keys::KEY_ENTER]), keys::KEY_ENTER));
+        assert!(enter_alone(&held(&[keys::KEY_KPENTER]), keys::KEY_KPENTER));
+        assert!(!enter_alone(
+            &held(&[keys::KEY_LEFTSHIFT, keys::KEY_ENTER]),
+            keys::KEY_ENTER
+        ));
+        assert!(!enter_alone(
+            &held(&[keys::KEY_LEFTCTRL, keys::KEY_ENTER]),
+            keys::KEY_ENTER
+        ));
+        assert!(!enter_alone(&held(&[keys::KEY_SPACE]), keys::KEY_SPACE));
+    }
 }
